@@ -70,22 +70,40 @@ namespace ts {
 
             //! Access the complete RTP datagram for ingestion or inspection.
             //! @return Mutable data, valid for the lifetime of this datagram.
-            ByteBlock& data() { return _data; }
+            ByteBlock& data()
+            {
+                return _data;
+            }
             //! Inspect the complete RTP datagram.
             //! @return Read-only data, valid for the lifetime of this datagram.
-            const ByteBlock& data() const { return _data; }
+            const ByteBlock& data() const
+            {
+                return _data;
+            }
             //! Get the monotonic receive time used for playout.
             //! @return Receive time, valid for the lifetime of this datagram.
-            const TimePoint& arrival() const { return _arrival; }
+            const TimePoint& arrival() const
+            {
+                return _arrival;
+            }
             //! Set the monotonic receive time.
             //! @param [in] value Receive time from Clock, independent of RTP and kernel clocks.
-            void setArrival(const TimePoint& value) { _arrival = value; }
+            void setArrival(const TimePoint& value)
+            {
+                _arrival = value;
+            }
             //! Get the original kernel receive timestamp, if available.
             //! @return Kernel timestamp, or -1 microsecond when unavailable.
-            cn::microseconds receiveTimestamp() const { return _timestamp; }
+            cn::microseconds receiveTimestamp() const
+            {
+                return _timestamp;
+            }
             //! Get the original receive timestamp's clock type.
             //! @return Kernel timestamp type, or NONE for reconstructed media.
-            UDPSocket::TimeStampType receiveTimestampType() const { return _timestamp_type; }
+            UDPSocket::TimeStampType receiveTimestampType() const
+            {
+                return _timestamp_type;
+            }
             //! Store the original datagram's kernel receive metadata.
             //! @param [in] value Kernel receive timestamp, or a negative value if unavailable.
             //! @param [in] type Clock type reported by the UDP socket.
@@ -97,7 +115,10 @@ namespace ts {
             //! Check whether parity reconstructed this datagram.
             //! Only the decoder can mark a datagram as recovered.
             //! @return True for reconstructed media, false for an original datagram.
-            bool isRecovered() const { return _recovered; }
+            bool isRecovered() const
+            {
+                return _recovered;
+            }
 
         private:
             friend class RTPFECDecoder;
@@ -164,20 +185,35 @@ namespace ts {
         //! The caller must drain media before inserting another datagram when full.
         //! @return True when the oldest pending media must be released early.
         //!
-        bool isPlayoutBufferFull() const { return _initialized && _highest - _next >= int64_t(_max_packets) - 1; }
+        bool isPlayoutBufferFull() const
+        {
+            return _initialized && _highest - _next >= static_cast<int64_t>(_max_packets) - 1;
+        }
 
         //! Count successfully reconstructed media.
         //! @return Number of recovered RTP datagrams since reset().
-        uint64_t recoveredPackets() const { return _recovered; }
+        uint64_t recoveredPackets() const
+        {
+            return _recovered;
+        }
         //! Count media gaps finalized by playout.
         //! @return Number of expired missing RTP datagrams since reset().
-        uint64_t lostPackets() const { return _lost; }
+        uint64_t lostPackets() const
+        {
+            return _lost;
+        }
         //! Inspect retained media storage.
         //! @return Number of buffered datagrams, including already played history.
-        size_t bufferedMedia() const { return _media.size(); }
+        size_t bufferedMedia() const
+        {
+            return _media.size();
+        }
         //! Inspect retained parity storage.
         //! @return Number of incomplete equations and unanchored FEC datagrams.
-        size_t bufferedFEC() const { return _fec.size() + _early_fec.size(); }
+        size_t bufferedFEC() const
+        {
+            return _fec.size() + _early_fec.size();
+        }
 
     private:
         //! Identify parity by extended base sequence, stride, count and direction.

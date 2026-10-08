@@ -46,7 +46,10 @@ namespace ts {
         static constexpr uint32_t _ssrc = 0x12345678; // Parity RTP SSRC is zero; media use another value.
 
         // Deterministic clock: these tests never sleep or depend on wall time.
-        static Decoder::TimePoint _now() { return Decoder::TimePoint(cn::seconds(1)); }
+        static Decoder::TimePoint _now()
+        {
+            return Decoder::TimePoint(cn::seconds(1));
+        }
         static Datagram _makePacket(uint16_t sequence, size_t ts_size = 188, size_t count = 1);
         static Media _makePackets(size_t count, uint16_t base = 1000, size_t ts_size = 188, size_t ts_count = 1);
         static Datagram _makeParity(const Media& media, size_t base, size_t offset, size_t count, bool row = false);
@@ -65,10 +68,10 @@ namespace ts {
         packet.data()[1] = 33; // The MPEG-TS RTP payload type, with marker zero.
         ts::PutUInt16(packet.data().data() + 2, sequence); // The supplied sequence already includes wire wrap.
         // Exercise 32-bit RTP timestamp wrapping as well as payload recovery.
-        ts::PutUInt32(packet.data().data() + 4, 0xFFFF0000 + uint32_t(sequence) * 900);
+        ts::PutUInt32(packet.data().data() + 4, 0xFFFF0000 + static_cast<uint32_t>(sequence) * 900);
         ts::PutUInt32(packet.data().data() + 8, _ssrc); // Use a nonzero media source identifier.
         for (size_t index = 12; index < packet.data().size(); ++index) {
-            packet.data()[index] = uint8_t(sequence * 7 + index * 13); // Distinct payloads expose incorrect XOR or packet ordering.
+            packet.data()[index] = static_cast<uint8_t>(sequence * 7 + index * 13); // Distinct payloads expose incorrect XOR or packet ordering.
         }
         for (size_t index = 12; index < packet.data().size(); index += ts_size) {
             packet.data()[index] = 0x47; // TS sync at every boundary, including RS204 trailers.
@@ -83,7 +86,7 @@ namespace ts {
     {
         Media packets;
         for (size_t index = 0; index < count; ++index) {
-            packets.push_back(_makePacket(uint16_t(base + index), ts_size, ts_count)); // Casting deliberately wraps the RTP sequence.
+            packets.push_back(_makePacket(static_cast<uint16_t>(base + index), ts_size, ts_count)); // Casting deliberately wraps the RTP sequence.
         }
         return packets;
     }
@@ -106,13 +109,13 @@ namespace ts {
         ts::PutUInt16(fec.data().data() + 12, ts::GetUInt16(media[base].data().data() + 2)); // SNBase identifies media, not FEC RTP sequence.
         fec.data()[16] = 0x80; // E=1; recovery PT bits are XORed below.
         fec.data()[24] = row ? 0x40 : 0; // D distinguishes rows from columns.
-        fec.data()[25] = uint8_t(offset); // Select periodic media members independently of block alignment.
-        fec.data()[26] = uint8_t(count); // NA is a count, not the last member index.
+        fec.data()[25] = static_cast<uint8_t>(offset); // Select periodic media members independently of block alignment.
+        fec.data()[26] = static_cast<uint8_t>(count); // NA is a count, not the last member index.
         uint16_t length_xor = 0; // Length recovery is the XOR of payload lengths.
         uint32_t timestamp_xor = 0; // Timestamp recovery is independent of parity RTP timestamp.
         for (size_t index = 0; index < count; ++index) {
             const auto& packet = media[base + index * offset].data(); // Select the exact members named by the FEC header.
-            length_xor ^= uint16_t(packet.size() - 12); // Exclude the fixed RTP header from length recovery.
+            length_xor ^= static_cast<uint16_t>(packet.size() - 12); // Exclude the fixed RTP header from length recovery.
             timestamp_xor ^= ts::GetUInt32(packet.data() + 4); // Include wrap in the unsigned 32-bit timestamp.
             fec.data()[16] ^= packet[1] & 0x7F; // Keep E while computing the independent PT recovery bits.
             for (size_t pos = 12; pos < packet.size(); ++pos) {

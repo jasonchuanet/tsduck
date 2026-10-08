@@ -326,12 +326,12 @@ namespace ts {
             Datagram output;
             while (decoder.getDatagram(output, now)) {
                 // More than a full sequence cycle must preserve exact packet order.
-                TSUNIT_ASSERT(output.data() == _makePacket(uint16_t(65000 + emitted)).data());
+                TSUNIT_ASSERT(output.data() == _makePacket(static_cast<uint16_t>(65000 + emitted)).data());
                 ++emitted;
             }
         };
         for (size_t group = 0; group < groups; ++group) {
-            Media media(_makePackets(4, uint16_t(65000 + 4 * group)));
+            Media media(_makePackets(4, static_cast<uint16_t>(65000 + 4 * group)));
             for (size_t index = 0; index < 4; ++index) {
                 media[index].setArrival(media[index].arrival() + cn::milliseconds(4 * group + index));
             }

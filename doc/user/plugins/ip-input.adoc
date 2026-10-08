@@ -1,7 +1,7 @@
 `//----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -21,9 +21,52 @@ Optional extra data at the beginning of the datagram (such as RTP headers) are d
 Using this plugin forces `tsp` and all plugins to use their real-time defaults (see the reference documentation for `tsp`).
 
 [.usage]
+SMPTE forward error correction
+
+Use `--fec=1` to receive SMPTE ST 2022-1 column FEC (1D), or `--fec=2` to receive column and row FEC (2D).
+The media stream uses the specified UDP port, column FEC uses that port plus 2, and row FEC uses that port plus 4.
+All streams use the same destination address and local interface, for unicast or multicast.
+An explicit source IP filter also applies to FEC, but the media source port filter does not apply to the FEC streams.
+FEC is associated with the IP address of the first accepted media sender.
+Only the first accepted media sender's IP address and UDP port are processed when FEC is enabled.
+
+The media format is SMPTE ST 2022-2 MPEG-TS over RTP: payload type 33, a fixed 12-byte RTP header,
+no padding, extension, contributing sources or marker, and one to seven TS packets per datagram.
+Both 188-byte and 204-byte TS packets are supported.
+Parity uses RTP payload type 96 and the 16-byte extended XOR FEC header from SMPTE ST 2022-1.
+Unsupported or malformed media and FEC datagrams are ignored.
+The plugin supports both block-aligned and staggered column arrangements using each FEC packet's sequence base, offset and count.
+
+Media are buffered and returned in RTP sequence order, with duplicates discarded.
+A parity packet can recover one missing member of its group.
+In 2D mode, recovered packets can make other row or column groups recoverable.
+Loss patterns that cannot be recovered are skipped when their playout deadline expires.
+FEC packets may also be lost; the plugin continues receiving media when no parity is available.
+A change of media SSRC starts a new FEC session.
+
+Choose `--fec-latency` to cover the sender's FEC delay and network jitter.
+For block-aligned FEC, allow approximately two matrices of media transmission time, plus network jitter.
+The default latency is one second.
+The sequence window set by `--fec-buffer-size` must also accommodate the media rate over this delay and the FEC history.
+If the window fills, older media are released before their deadline and recovery may be reduced.
+At verbose level the plugin reports recovered and unrecoverable RTP datagram counts when stopping.
+Receive queue overflow is reported separately; increase the buffer size if this occurs.
+
+For example, receive media on multicast port 5000, column FEC on port 5002, and row FEC on port 5004:
+
+[source,shell]
+----
+$ tsp -I ip 239.1.2.3:5000 --fec=2 --fec-latency 1000 -O file recovered.ts
+----
+
+[.usage]
 Input timestamps
 
 When the input is an RTP stream, the RTP timestamp value is used as input timestamp by `tsp`.
+
+FEC recovery restores the RTP timestamp of a missing media datagram.
+Recovered datagrams have no kernel receive timestamp; the configured timestamp priority falls back to RTP or `tsp`.
+Original datagrams retain their kernel timestamps even when buffered for FEC.
 
 On Linux systems, the kernel reports a system timestamp for each UDP datagram.
 This value is used as input timestamp by `tsp` for all TS packets in the UDP datagram.
@@ -58,6 +101,35 @@ and receives the packets which are sent to one of the local (unicast) IP address
 
 [.usage]
 UDP reception options
+
+[.opt]
+*--fec*[=1|2]
+
+[.optdoc]
+Enable SMPTE ST 2022-1 FEC for MPEG-TS over RTP using the SMPTE ST 2022-2 media profile.
+The value 1 enables column FEC on the media port plus 2.
+The value 2 enables column and row FEC on the media ports plus 2 and plus 4.
+When no value is supplied, 2 is used.
+FEC is disabled by default.
+
+[.opt]
+*--fec-buffer-size* _datagrams_
+
+[.optdoc]
+Bound the media sequence window, pending parity and receive queue used for FEC.
+The value is in RTP datagrams, not TS packets or bytes, and must be between 256 and 32767.
+The default is 4096.
+When the sequence window fills, older media are released early.
+Requires `--fec`.
+
+[.opt]
+*--fec-latency* _milliseconds_
+
+[.optdoc]
+Specify the FEC playout latency, including time for the sender's parity and network jitter.
+The default is 1000 milliseconds; the permitted range is 1 to 60000 milliseconds.
+Missing media are skipped when their deadline expires.
+Requires `--fec`.
 
 [.opt]
 *-b* _value_ +

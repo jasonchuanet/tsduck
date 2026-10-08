@@ -15,6 +15,9 @@ VERSION 3.46-4827 (October 2026)
   * The plugins "srt" now accept a srt:// URL as parameter. The URL can contain
     most usual SRT parameters. The format of these URLs is not yet standardized
     and the specification may evolve.
+  * Input plugin "ip" can recover missing SMPTE ST 2022-2 RTP datagrams using
+    SMPTE ST 2022-1 column FEC (1D) or column and row FEC (2D). Reception uses
+    bounded buffering, sequence reordering and iterative parity recovery.
   * The "TSDuck Developer Guide" has been split in three different guides:  the
     "Builder Guide"  (how to build and install TSDuck),  the  "Developer Guide"
     (how to develop applications using the TSDuck  library),  the  "Contributor
@@ -26,6 +29,7 @@ VERSION 3.46-4827 (October 2026)
       plugins "srt".
   * New options in existing commands and plugins:
     - Option --display-url in plugins "srt".
+    - Options --fec, --fec-latency, --fec-buffer-size in input plugin "ip".
 
 [BUG] Bug fixes:
 

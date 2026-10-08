@@ -183,8 +183,8 @@ namespace ts {
         //! Identify parity by extended base sequence, stride, count and direction.
         using FECKey = std::tuple<int64_t, uint8_t, uint8_t, bool>;
 
-        //! Partially reduced parity; only missing media need further XOR operations.
-        class FEC
+        //! Partially reduced parity, exported for cleanup through public inline destruction.
+        class TSDUCKDLL FEC
         {
             friend class RTPFECDecoder;
         public:

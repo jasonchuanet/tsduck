@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -495,8 +495,15 @@ void ts::Args::setTail(const UString& tail)
 
 void ts::Args::setFlags(int flags)
 {
+    // Changing error-handling policy must not rebuild the option table:
+    // a caller can disable built-in --version and define its own --version.
+    // Preserve those custom definitions unless the flags which govern
+    // predefined options themselves are changed.
+    const bool update_options = ((_flags ^ flags) & (NO_HELP | NO_VERSION | NO_DEBUG | NO_VERBOSE)) != 0;
     _flags = flags;
-    adjustPredefinedOptions();
+    if (update_options) {
+        adjustPredefinedOptions();
+    }
 }
 
 

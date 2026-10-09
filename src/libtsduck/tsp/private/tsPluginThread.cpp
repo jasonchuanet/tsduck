@@ -54,6 +54,12 @@ ts::PluginThread::PluginThread(Report* report, const UString& appName, PluginTyp
     }
 
     if (_plugin == nullptr || !_analyzeOptions(appName + shell_opt, options, report->maxSeverity())) {
+        // Filtered parser diagnostics may not reach the owner's report. Mark
+        // failure there even when its severity threshold suppresses output.
+        // The UString overload records errors before applying that threshold.
+        if (!report->gotErrors()) {
+            report->log(Severity::Error, UString::Format(u"error initializing plugin %s", _name));
+        }
         // The owner checks report errors and cleans up the partial chain.
         return;
     }

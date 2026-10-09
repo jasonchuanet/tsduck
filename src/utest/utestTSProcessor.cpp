@@ -25,6 +25,7 @@ class TSProcessorTest: public tsunit::Test
 {
     TSUNIT_DECLARE_TEST(Processing);
     TSUNIT_DECLARE_TEST(InvalidPluginOptions);
+    TSUNIT_DECLARE_TEST(InvalidPluginLookupSilenced);
 };
 
 TSUNIT_REGISTER(TSProcessorTest);
@@ -198,39 +199,67 @@ TSUNIT_DEFINE_TEST(InvalidPluginOptions)
     // Input and output are constructed before processors, so these positions
     // exercise cleanup of different partially built chains.
     // Null, until and drop are built-in plugins and need no sockets or devices.
-    for (const auto type : {ts::PluginType::INPUT, ts::PluginType::PROCESSOR, ts::PluginType::OUTPUT}) {
-        // Capture the diagnostic independently of asynchronous logger scheduling.
-        ts::ReportBuffer<ts::ThreadSafety::Full> report;
-        ts::TSProcessor tsproc(report);
-        ts::TSProcessorArgs opt;
-        // A finite source also bounds an accidentally accepted configuration.
-        opt.input = {u"null", {u"1"}};
-        opt.output = {u"drop"};
-        if (type == ts::PluginType::INPUT) {
-            opt.input.args.push_back(u"--invalid-plugin-option");
+    // A caller may hide diagnostics, but an invalid configuration must still
+    // fail. Filtering a plugin's report must not hide failure from its owner.
+    for (const int severity : {ts::Severity::Info, ts::Severity::Fatal}) {
+        for (const auto type : {ts::PluginType::INPUT, ts::PluginType::PROCESSOR, ts::PluginType::OUTPUT}) {
+            // Capture diagnostics independently of asynchronous logger scheduling.
+            ts::ReportBuffer<ts::ThreadSafety::Full> report(severity);
+            ts::TSProcessor tsproc(report);
+            ts::TSProcessorArgs opt;
+            // A finite source also bounds an accidentally accepted configuration.
+            opt.input = {u"null", {u"1"}};
+            opt.output = {u"drop"};
+            if (type == ts::PluginType::INPUT) {
+                opt.input.args.push_back(u"--invalid-plugin-option");
+            }
+            else if (type == ts::PluginType::OUTPUT) {
+                opt.output.args.push_back(u"--invalid-plugin-option");
+            }
+            else {
+                opt.plugins = {{u"until", {u"--invalid-plugin-option"}}};
+            }
+            // Neither visible nor hidden errors may terminate or start the host.
+            TSUNIT_ASSERT(!tsproc.start(opt));
+            TSUNIT_ASSERT(report.gotErrors());
+            if (severity == ts::Severity::Fatal) {
+                TSUNIT_ASSERT(report.messages().empty());
+            }
+            else {
+                TSUNIT_ASSERT(report.messages().contains(u"unknown option --invalid-plugin-option"));
+            }
+            // Reuse the processor to detect stale ring entries or thread attributes.
+            opt.input.args = {u"1"};
+            opt.output.args.clear();
+            opt.plugins.clear();
+            report.clear();
+            // Starting again resets errors from the failed chain at either severity.
+            TSUNIT_ASSERT(tsproc.start(opt));
+            tsproc.waitForTermination();
+            TSUNIT_ASSERT(!report.gotErrors());
         }
-        else if (type == ts::PluginType::OUTPUT) {
-            opt.output.args.push_back(u"--invalid-plugin-option");
-        }
-        else {
-            opt.plugins = {{u"until", {u"--invalid-plugin-option"}}};
-        }
-        // The previous path terminated the host before these assertions ran,
-        // even when its logging thread had not yet printed the argument error.
-        TSUNIT_ASSERT(!tsproc.start(opt));
-        TSUNIT_ASSERT(report.messages().contains(u"unknown option --invalid-plugin-option"));
-        // Every partly constructed chain must be cleaned up and reusable.
-        // Reuse this processor to detect stale ring entries or thread attributes;
-        // constructing a fresh processor would not exercise that ownership.
-        opt.input.args = {u"1"};
-        opt.output.args.clear();
-        opt.plugins.clear();
-        report.clear();
-        // Starting again must reset the report's error state from the failed chain.
-        TSUNIT_ASSERT(tsproc.start(opt));
-        tsproc.waitForTermination();
-        TSUNIT_ASSERT(!report.gotErrors());
     }
+}
+
+// A missing plugin uses the same constructor failure path as invalid options.
+TSUNIT_DEFINE_TEST(InvalidPluginLookupSilenced)
+{
+    // No diagnostic is requested, but initialization failure must be recorded.
+    ts::ReportBuffer<ts::ThreadSafety::Full> report(ts::Severity::Fatal);
+    ts::TSProcessor tsproc(report);
+    ts::TSProcessorArgs opt;
+    opt.input = {u"not-a-tsduck-plugin"};
+    opt.output = {u"drop"};
+    // The owner must clean up the executor with no allocated plugin instance.
+    TSUNIT_ASSERT(!tsproc.start(opt));
+    TSUNIT_ASSERT(report.gotErrors());
+    TSUNIT_ASSERT(report.messages().empty());
+    // A valid finite source then confirms the partial chain was released.
+    opt.input = {u"null", {u"1"}};
+    report.clear();
+    TSUNIT_ASSERT(tsproc.start(opt));
+    tsproc.waitForTermination();
+    TSUNIT_ASSERT(!report.gotErrors());
 }
 
 TSUNIT_DEFINE_TEST(Processing)

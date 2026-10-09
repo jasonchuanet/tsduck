@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -35,6 +35,8 @@ namespace ts {
         //! @param [in,out] report Initial report object.
         //! The @a report object is used to forward messages which are sent to this
         //! PluginThread instance (PluginThread is a subclass of Report through TSP).
+        //! Invalid arguments are reported without exiting the calling process.
+        //! Callers must check @a report for errors before starting the thread.
         //! @param [in] appName Application name, for help messages.
         //! @param [in] type Plugin type.
         //! @param [in] options Command line options for this plugin.
@@ -69,5 +71,8 @@ namespace ts {
     private:
         const UString _name;    // Plugin name.
         Plugin*       _plugin;  // Plugin instance.
+
+        // Configure a created plugin and return argument errors to its owner.
+        bool _analyzeOptions(const UString& shell, const PluginOptions& options, int max_severity);
     };
 }

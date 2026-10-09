@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -13,6 +13,7 @@
 #include "tsTSProcessor.h"
 #include "tsPluginRepository.h"
 #include "tsCerrReport.h"
+#include "tsReportBuffer.h"
 #include "tsunit.h"
 
 
@@ -23,6 +24,7 @@
 class TSProcessorTest: public tsunit::Test
 {
     TSUNIT_DECLARE_TEST(Processing);
+    TSUNIT_DECLARE_TEST(InvalidPluginOptions);
 };
 
 TSUNIT_REGISTER(TSProcessorTest);
@@ -188,6 +190,48 @@ void TestEventHandler::handlePluginEvent(const ts::PluginEventContext& ctx)
 //----------------------------------------------------------------------------
 // Unitary tests.
 //----------------------------------------------------------------------------
+
+TSUNIT_DEFINE_TEST(InvalidPluginOptions)
+{
+    // Bad plugin arguments must return failure to the caller, not exit its process.
+    // Use a thread-safe report because a later successful run starts plugin threads.
+    // Input and output are constructed before processors, so these positions
+    // exercise cleanup of different partially built chains.
+    // Null, until and drop are built-in plugins and need no sockets or devices.
+    for (const auto type : {ts::PluginType::INPUT, ts::PluginType::PROCESSOR, ts::PluginType::OUTPUT}) {
+        // Capture the diagnostic independently of asynchronous logger scheduling.
+        ts::ReportBuffer<ts::ThreadSafety::Full> report;
+        ts::TSProcessor tsproc(report);
+        ts::TSProcessorArgs opt;
+        // A finite source also bounds an accidentally accepted configuration.
+        opt.input = {u"null", {u"1"}};
+        opt.output = {u"drop"};
+        if (type == ts::PluginType::INPUT) {
+            opt.input.args.push_back(u"--invalid-plugin-option");
+        }
+        else if (type == ts::PluginType::OUTPUT) {
+            opt.output.args.push_back(u"--invalid-plugin-option");
+        }
+        else {
+            opt.plugins = {{u"until", {u"--invalid-plugin-option"}}};
+        }
+        // The previous path terminated the host before these assertions ran,
+        // even when its logging thread had not yet printed the argument error.
+        TSUNIT_ASSERT(!tsproc.start(opt));
+        TSUNIT_ASSERT(report.messages().contains(u"unknown option --invalid-plugin-option"));
+        // Every partly constructed chain must be cleaned up and reusable.
+        // Reuse this processor to detect stale ring entries or thread attributes;
+        // constructing a fresh processor would not exercise that ownership.
+        opt.input.args = {u"1"};
+        opt.output.args.clear();
+        opt.plugins.clear();
+        report.clear();
+        // Starting again must reset the report's error state from the failed chain.
+        TSUNIT_ASSERT(tsproc.start(opt));
+        tsproc.waitForTermination();
+        TSUNIT_ASSERT(!report.gotErrors());
+    }
+}
 
 TSUNIT_DEFINE_TEST(Processing)
 {

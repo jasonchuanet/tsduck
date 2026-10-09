@@ -69,8 +69,8 @@ namespace ts {
         virtual Plugin* plugin() const override;
 
     private:
-        const UString _name;    // Plugin name.
-        Plugin*       _plugin;  // Plugin instance.
+        const UString _name;              // Plugin name.
+        Plugin*       _plugin = nullptr;  // Plugin instance.
 
         // Configure a created plugin and return argument errors to its owner.
         bool _analyzeOptions(const UString& shell, const PluginOptions& options, int max_severity);

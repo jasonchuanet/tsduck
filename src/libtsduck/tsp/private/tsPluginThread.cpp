@@ -18,8 +18,7 @@
 ts::PluginThread::PluginThread(Report* report, const UString& appName, PluginType type, const PluginOptions& options, const ThreadAttributes& attributes) :
     Thread(),
     TSP(report->maxSeverity(), options.name + u": ", report),
-    _name(options.name),
-    _plugin(nullptr)
+    _name(options.name)
 {
     const UChar* shell_opt = nullptr;
 

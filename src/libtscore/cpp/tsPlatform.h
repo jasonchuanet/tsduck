@@ -767,6 +767,7 @@ TS_MSC_NOWARNING(5045)  // Compiler will insert Spectre mitigation for memory lo
 #include <string>
 #include <vector>
 #include <array>
+#include <span>
 #include <deque>
 #include <list>
 #include <map>

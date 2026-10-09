@@ -29,7 +29,7 @@ namespace ts {
         //! @param [in,out] report Destination for configuration and transmission errors.
         explicit RTPFECOutput(Report& report);
         //! Destructor; releases parity without closing the borrowed media socket.
-        virtual ~RTPFECOutput() = default;
+        virtual ~RTPFECOutput();
         //! Define optional FEC and matrix command-line arguments.
         //! @param [in,out] args Argument definitions to extend.
         void defineArgs(Args& args) const;

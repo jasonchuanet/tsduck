@@ -17,6 +17,9 @@ namespace ts {
         // filtering, report formatting and their platform-dependent call stacks.
         constexpr size_t RECEIVER_STACK_SIZE = 128 * 1024;
         constexpr cn::milliseconds ABORT_POLL_INTERVAL {100};
+        constexpr uint16_t COLUMN_PORT_OFFSET = 2; // Standard RTP/RTCP port pairs reserve the adjacent odd port.
+        constexpr uint16_t ROW_PORT_OFFSET = 4; // Both parity sockets are opened; a 1D sender leaves the row stream quiet.
+        constexpr uint16_t MAX_PORT = 65535; // Check destination arithmetic before narrowing back to a port.
     }
 }
 
@@ -44,7 +47,7 @@ ts::IPInputPlugin::IPInputPlugin(TSP* tsp_) :
          u"All streams use the same destination address and local interface. "
          u"FEC is disabled by default.");
 
-    option<cn::milliseconds>(u"smpte-2022-fec-latency", 0, 0, 1, 1, 60000);
+    option<cn::milliseconds>(u"smpte-2022-fec-latency", 0, 0, 1, RTPFECDecoder::MIN_LATENCY.count(), RTPFECDecoder::MAX_LATENCY.count());
     help(u"smpte-2022-fec-latency",
          u"Specify the FEC playout latency in milliseconds. The default is 1000. "
          u"Allow time for the sender's FEC matrix and network jitter. "
@@ -67,14 +70,14 @@ bool ts::IPInputPlugin::getOptions()
     // Get command line arguments for superclass and socket.
     const bool ok = SuperClass::getOptions() && _sock_args.loadArgs(*this, _sock.parameters().receive_timeout);
     _sock.setParameters(_sock_args);                    // Media keeps all existing UDP receiver options.
-    _fec_streams = present(u"smpte-2022-fec") ? 2 : 0; // Row silence is normal for a column-only sender.
+    _fec_enabled = present(u"smpte-2022-fec"); // Row silence is normal for a column-only sender.
     getIntValue(_fec_buffer_size, u"smpte-2022-fec-buffer-size", RTPFECDecoder::DEFAULT_BUFFER_SIZE); // A datagram window, not bytes.
     getChronoValue(_fec_latency, u"smpte-2022-fec-latency", RTPFECDecoder::DEFAULT_LATENCY); // Monotonic playout delay.
-    if (_fec_streams == 0 && (present(u"smpte-2022-fec-latency") || present(u"smpte-2022-fec-buffer-size"))) {
+    if (!_fec_enabled && (present(u"smpte-2022-fec-latency") || present(u"smpte-2022-fec-buffer-size"))) {
         error(u"--smpte-2022-fec-latency and --smpte-2022-fec-buffer-size require --smpte-2022-fec");
         return false;                                  // Reject options that would otherwise be silently ignored.
     }
-    if (_fec_streams > 0 && _sock_args.destination.port() > 65535 - 2 * _fec_streams) {
+    if (_fec_enabled && _sock_args.destination.port() > MAX_PORT - ROW_PORT_OFFSET) {
         error(u"media port is too high for the FEC ports");
         return false;                                  // Prevent wrapping a parity destination back to port zero.
     }
@@ -92,7 +95,7 @@ bool ts::IPInputPlugin::start()
     if (!SuperClass::start() || !_sock.open()) {
         return false;
     }
-    if (_fec_streams == 0) {
+    if (!_fec_enabled) {
         return true;                                   // No workers or parity sockets on ordinary UDP input.
     }
     _closing = false;                                  // Receiver objects can be reused after plugin restart.
@@ -111,14 +114,12 @@ bool ts::IPInputPlugin::start()
     args.receive_timeout = cn::milliseconds(-1);        // Absence of parity must not stop the media input.
     args.use_first_source = false;                     // Parity is pinned to the accepted media IP instead.
     args.source.setPort(IPSocketAddress::AnyPort);       // Interoperate with senders using separate FEC source ports.
-    args.destination.setPort(_sock_args.destination.port() + 2); // First parity stream: columns.
+    args.destination.setPort(_sock_args.destination.port() + COLUMN_PORT_OFFSET); // First parity stream: columns.
     _column_sock.setParameters(args);
-    if (_fec_streams == 2) {
-        args.destination.setPort(_sock_args.destination.port() + 4); // Second parity stream: rows.
-        _row_sock.setParameters(args);
-    }
-    if (!_column_sock.open() || (_fec_streams == 2 && !_row_sock.open()) ||
-        !_media_receiver.start() || !_column_receiver.start() || (_fec_streams == 2 && !_row_receiver.start())) {
+    args.destination.setPort(_sock_args.destination.port() + ROW_PORT_OFFSET); // Receive either wire dimension without a mode option.
+    _row_sock.setParameters(args);
+    if (!_column_sock.open() || !_row_sock.open() ||
+        !_media_receiver.start() || !_column_receiver.start() || !_row_receiver.start()) {
         _closeReceivers();                             // Undo even a partially successful socket/thread startup.
         return false;
     }
@@ -133,7 +134,7 @@ bool ts::IPInputPlugin::start()
 bool ts::IPInputPlugin::stop()
 {
     _closeReceivers();                                 // Join before reading statistics written during reception.
-    if (_fec_streams > 0) {
+    if (_fec_enabled) {
         verbose(u"FEC recovered %'d RTP datagrams, lost %'d RTP datagrams", _fec.recoveredPackets(), _fec.lostPackets());
         if (_queue_overflows.load() > 0) {
             warning(u"FEC receive queue dropped %'d datagrams; increase --smpte-2022-fec-buffer-size", _queue_overflows.load());
@@ -155,9 +156,9 @@ bool ts::IPInputPlugin::abortInput()
     // A closed socket is already clean; close() reports false in that state.
     const bool media_closed = already_closing || !_sock.isOpen() || _sock.close(true); // Interrupt blocking media reception.
     const bool column_closed = already_closing || !_column_sock.isOpen() || _column_sock.close(true); // Parity can remain idle.
-    const bool row_closed = already_closing || !_row_sock.isOpen() || _row_sock.close(true); // Row reception is optional.
-    if (_fec_streams > 0 && !already_closing) {
-        auto end = std::make_shared<Datagram>();
+    const bool row_closed = already_closing || !_row_sock.isOpen() || _row_sock.close(true); // Row traffic may be absent.
+    if (_fec_enabled && !already_closing) {
+        auto end = std::make_shared<_Datagram>();
         end->_end = true; // An abort marker is unique; normal producers remain strictly bounded.
         _queue.forceEnqueue(end);                      // Wake a consumer even when the ordinary queue is full.
     }
@@ -184,7 +185,7 @@ bool ts::IPInputPlugin::setReceiveTimeout(cn::milliseconds timeout)
 
 bool ts::IPInputPlugin::receiveDatagram(uint8_t* buffer, size_t buffer_size, size_t& ret_size, cn::microseconds& timestamp, TimeSource& timesource)
 {
-    if (_fec_streams > 0) {
+    if (_fec_enabled) {
         return _receiveFEC(buffer, buffer_size, ret_size, timestamp, timesource);
     }
 
@@ -229,7 +230,7 @@ bool ts::IPInputPlugin::_receiveFEC(uint8_t* buffer, size_t buffer_size, size_t&
         }
         // Periodically check abort even without any traffic or buffered media.
         delay = std::min(delay, ABORT_POLL_INTERVAL);   // Make quiet-stream aborts prompt on every platform.
-        std::shared_ptr<Datagram> datagram;
+        std::shared_ptr<_Datagram> datagram;
         if (!_queue.dequeue(datagram, delay)) {
             continue;                             // A dequeue timeout may simply mean media is ready to play.
         }
@@ -245,19 +246,19 @@ bool ts::IPInputPlugin::_receiveFEC(uint8_t* buffer, size_t buffer_size, size_t&
 // Malformed or unrelated datagrams are discarded without ending the stream.
 //----------------------------------------------------------------------------
 
-void ts::IPInputPlugin::_processDatagram(const std::shared_ptr<Datagram>& datagram)
+void ts::IPInputPlugin::_processDatagram(const std::shared_ptr<_Datagram>& datagram)
 {
     if (datagram->_end) {
         _input_ended = true;                   // Do not discard buffered data after a socket error.
     }
-    else if (datagram->_stream == Stream::MEDIA) {
+    else if (datagram->_stream == _Stream::MEDIA) {
         // Pin parity to the first accepted media sender. Explicit UDP
         // filtering is already applied by UDPReceiver on each socket.
         if ((!_media_source.hasAddress() || _media_source == datagram->_sender) && _fec.addMedia(*datagram)) {
             _media_source = datagram->_sender;  // Remember the media port as well as its IP address.
             for (const auto& early : _early_fec) {
                 if (IPAddress(_media_source) == IPAddress(early->_sender)) {
-                    if (!_fec.addFEC(*early, early->_stream == Stream::ROW)) {
+                    if (!_fec.addFEC(*early, early->_stream == _Stream::ROW)) {
                         continue;                      // Unsupported parity is discarded without ending valid input.
                     }
                 }
@@ -271,7 +272,7 @@ void ts::IPInputPlugin::_processDatagram(const std::shared_ptr<Datagram>& datagr
         }
     }
     else if (IPAddress(_media_source) == IPAddress(datagram->_sender)) {
-        if (!_fec.addFEC(*datagram, datagram->_stream == Stream::ROW)) {
+        if (!_fec.addFEC(*datagram, datagram->_stream == _Stream::ROW)) {
             return;                                    // Rejection intentionally discards unsupported parity.
         }
     }
@@ -283,7 +284,10 @@ void ts::IPInputPlugin::_processDatagram(const std::shared_ptr<Datagram>& datagr
 // datagrams rather than blocking shutdown or allocating unbounded memory.
 //----------------------------------------------------------------------------
 
-ts::IPInputPlugin::Receiver::Receiver(IPInputPlugin& plugin, UDPReceiver& socket, Stream stream) :
+// Keep the private queued value's vtable in the plugin library too.
+ts::IPInputPlugin::_Datagram::~_Datagram() = default;
+
+ts::IPInputPlugin::_Receiver::_Receiver(IPInputPlugin& plugin, UDPReceiver& socket, _Stream stream) :
     SuperClass(ThreadAttributes().setStackSize(RECEIVER_STACK_SIZE)),
     _plugin(plugin),
     _socket(socket),
@@ -291,7 +295,7 @@ ts::IPInputPlugin::Receiver::Receiver(IPInputPlugin& plugin, UDPReceiver& socket
 {
 }
 
-ts::IPInputPlugin::Receiver::~Receiver()
+ts::IPInputPlugin::_Receiver::~_Receiver()
 {
     if (!waitForTermination()) {
         _plugin.error(u"cannot join IP FEC receiver");
@@ -299,11 +303,11 @@ ts::IPInputPlugin::Receiver::~Receiver()
     }
 }
 
-void ts::IPInputPlugin::Receiver::main()
+void ts::IPInputPlugin::_Receiver::main()
 {
     ByteBlock buffer(IP_MAX_PACKET_SIZE);              // A reusable receive buffer avoids truncating bad datagrams.
     while (!_plugin._closing.load()) {
-        auto datagram = std::make_shared<Datagram>();
+        auto datagram = std::make_shared<_Datagram>();
         datagram->_stream = _stream;                    // End markers also identify which receiver stopped.
         IPSocketAddress destination;
         size_t size = 0; // Never allocate from an earlier receive length after a socket error.
@@ -326,7 +330,7 @@ void ts::IPInputPlugin::Receiver::main()
         datagram->setArrival(RTPFECDecoder::Clock::now());
         datagram->setReceiveTimestamp(timestamp, timestamp_type); // Deadline clock is independent of kernel timestamp origin.
         // Reject oversized profile packets before allocating queued storage.
-        if (size > RTP_HEADER_SIZE + (_stream == Stream::MEDIA ? 0 : RTPFECDecoder::FEC_HEADER_SIZE) + RTPFECDecoder::MAX_TS_PACKETS * PKT_RS_SIZE) {
+        if (size > RTP_HEADER_SIZE + (_stream == _Stream::MEDIA ? 0 : RTPFECDecoder::FEC_HEADER_SIZE) + RTPFECDecoder::MAX_TS_PACKETS * PKT_RS_SIZE) {
             continue;
         }
         datagram->data().assign(buffer.begin(), buffer.begin() + size); // Queue only the received payload bytes.
@@ -352,13 +356,13 @@ void ts::IPInputPlugin::_closeReceivers()
     // Test isOpen() so repeated cleanup and unused parity sockets stay successful.
     const bool media_closed = !_sock.isOpen() || _sock.close(true); // Interrupt every socket before joining any worker.
     const bool column_closed = !_column_sock.isOpen() || _column_sock.close(true); // Parity inactivity must not obstruct shutdown.
-    const bool row_closed = !_row_sock.isOpen() || _row_sock.close(true); // Row reception is optional.
+    const bool row_closed = !_row_sock.isOpen() || _row_sock.close(true); // Row traffic may be absent.
     if (!media_closed || !column_closed || !row_closed) {
         error(u"error closing IP input sockets");        // Continue cleanup even if a close reports failure.
     }
     const bool media_joined = _media_receiver.waitForTermination(); // Never-started receivers are safe here too.
     const bool column_joined = _column_receiver.waitForTermination(); // Wait before destroying storage shared with this producer.
-    const bool row_joined = _row_receiver.waitForTermination(); // Column-only mode still has a safely unstarted receiver object.
+    const bool row_joined = _row_receiver.waitForTermination(); // Join the row socket even when the sender emits only columns.
     if (!media_joined || !column_joined || !row_joined) {
         error(u"cannot join IP FEC receivers");
         std::terminate();                              // Never free storage still reachable by a live worker.

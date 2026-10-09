@@ -33,6 +33,10 @@ namespace ts {
     }
 }
 
+// Anchor exported vtables in the library instead of emitting them in every caller.
+ts::RTPFECEncoder::~RTPFECEncoder() = default;
+ts::RTPFECEncoder::Datagram::~Datagram() = default;
+
 //----------------------------------------------------------------------------
 // Configuration bounds are validated before allocating or discarding state.
 //----------------------------------------------------------------------------
@@ -69,7 +73,7 @@ void ts::RTPFECEncoder::clear()
 // Check the full profile before advancing sequence, equations or scheduling.
 //----------------------------------------------------------------------------
 
-bool ts::RTPFECEncoder::_validMedia(const Media& media) const
+bool ts::RTPFECEncoder::_validMedia(const _Media& media) const
 {
     if (_columns_count == 0 || media[0] != RTP_FLAGS || media[1] != RTP_PT_MP2T ||
         (_initialized && (GetUInt16(media.data() + SEQUENCE_OFFSET) != _expected_sequence || GetUInt32(media.data() + SSRC_OFFSET) != _ssrc))) {
@@ -95,7 +99,7 @@ bool ts::RTPFECEncoder::_validMedia(const Media& media) const
 // The non-recovery header fields remain fixed and are never included in XOR.
 //----------------------------------------------------------------------------
 
-void ts::RTPFECEncoder::_accumulate(ByteBlock& parity, const Media& media, bool row) const
+void ts::RTPFECEncoder::_accumulate(ByteBlock& parity, const _Media& media, bool row) const
 {
     const size_t length = media.size() - RTP_HEADER_SIZE;
     if (parity.empty()) {
@@ -135,7 +139,7 @@ void ts::RTPFECEncoder::_emit(ByteBlock& parity, bool row, Datagrams& output)
 // Like Annex B's 4x5 example, SNBase values are 0,5,10,15,20,... in that case.
 //----------------------------------------------------------------------------
 
-void ts::RTPFECEncoder::_staggeredColumn(const Media& media, Datagrams& output)
+void ts::RTPFECEncoder::_staggeredColumn(const _Media& media, Datagrams& output)
 {
     const size_t column = _position % _columns_count;
     const size_t phase = (column % _rows_count) * _columns_count + column;
@@ -160,7 +164,7 @@ bool ts::RTPFECEncoder::addMedia(const void* address, size_t size, Datagrams& ou
     if (address == nullptr || size <= RTP_HEADER_SIZE || size > RTP_HEADER_SIZE + MAX_TS_PACKETS * PKT_RS_SIZE) {
         return false;
     }
-    const Media media(static_cast<const uint8_t*>(address), size);
+    const _Media media(static_cast<const uint8_t*>(address), size);
     if (!_validMedia(media)) {
         return false; // Validation leaves the current equations, sequence and scheduling unchanged.
     }

@@ -28,6 +28,8 @@ namespace ts {
     {
         TS_PLUGIN_CONSTRUCTORS(IPOutputPlugin);
     public:
+        using SuperClass = OutputPlugin; //!< Plugin superclass.
+
         // Implementation of plugin API.
         virtual bool getOptions() override;
         virtual bool start() override;
@@ -36,7 +38,6 @@ namespace ts {
         virtual bool send(const TSPacket*, const TSPacketMetadata*, size_t) override;
 
     private:
-        using SuperClass = OutputPlugin; //!< Plugin superclass.
         TSDatagramOutput _datagram {*this, TSDatagramOutputOptions::ALLOW_RTP | TSDatagramOutputOptions::ALLOW_RS204 | TSDatagramOutputOptions::ALLOW_FEC}; //!< Media and optional FEC use one UDP socket.
     };
 }

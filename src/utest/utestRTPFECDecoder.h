@@ -20,6 +20,9 @@
 namespace ts {
     class RTPFECDecoderTest: public tsunit::Test
     {
+    public:
+        using SuperClass = tsunit::Test; // Shared test lifecycle, independent of decoder implementation.
+
         TSUNIT_DECLARE_TEST(Column); // Single missing member in an interleaved column.
         TSUNIT_DECLARE_TEST(Iterative); // Recovery must propagate between row and column equations.
         TSUNIT_DECLARE_TEST(MandatoryMatrices); // Cover every required L/D combination and full bursts.
@@ -38,30 +41,32 @@ namespace ts {
         TSUNIT_DECLARE_TEST(DuplicateEquations); // Count a common singleton recovery only once.
         TSUNIT_DECLARE_TEST(RejectedParity); // Rejected deep validation must not change startup playout.
         TSUNIT_DECLARE_TEST(Pressure); // Shorten playout latency without discarding original media.
+        TSUNIT_DECLARE_TEST(ClockBounds); // Deadline subtraction must not overflow or round a future wait down.
+        TSUNIT_DECLARE_TEST(ParityPayloadType); // Fixed media PT determines parity recovery bits even before media arrives.
 
     private:
-        using Decoder = ts::RTPFECDecoder;
-        using Datagram = Decoder::Datagram;
-        using Media = std::vector<Datagram>; // Expected packets are kept independently of decoder storage.
-        static constexpr uint32_t _ssrc = 0x12345678; // Parity RTP SSRC is zero; media use another value.
+        using _Decoder = ts::RTPFECDecoder;
+        using _Datagram = _Decoder::Datagram;
+        using _Media = std::vector<_Datagram>; // Expected packets are kept independently of decoder storage.
+        static constexpr uint32_t _SSRC = 0x12345678; // Parity RTP SSRC is zero; media use another value.
 
         // Deterministic clock: these tests never sleep or depend on wall time.
-        static Decoder::TimePoint _now()
+        static _Decoder::TimePoint _Now()
         {
-            return Decoder::TimePoint(cn::seconds(1));
+            return _Decoder::TimePoint(cn::seconds(1));
         }
-        static Datagram _makePacket(uint16_t sequence, size_t ts_size = 188, size_t count = 1);
-        static Media _makePackets(size_t count, uint16_t base = 1000, size_t ts_size = 188, size_t ts_count = 1);
-        static Datagram _makeParity(const Media& media, size_t base, size_t offset, size_t count, bool row = false);
-        static void _send(Decoder& decoder, const Media& media, const std::set<size_t>& lost = {});
-        static void _checkOutput(Decoder& decoder, const Media& media, const std::set<size_t>& lost = {});
+        static _Datagram _MakePacket(uint16_t sequence, size_t ts_size = 188, size_t count = 1);
+        static _Media _MakePackets(size_t count, uint16_t base = 1000, size_t ts_size = 188, size_t ts_count = 1);
+        static _Datagram _MakeParity(const _Media& media, size_t base, size_t offset, size_t count, bool row = false);
+        static void _Send(_Decoder& decoder, const _Media& media, const std::set<size_t>& lost = {});
+        static void _CheckOutput(_Decoder& decoder, const _Media& media, const std::set<size_t>& lost = {});
     };
 
     // Header-only fixture helpers keep the test cases short and independently readable.
-    inline ts::RTPFECDecoder::Datagram RTPFECDecoderTest::_makePacket(uint16_t sequence, size_t ts_size, size_t count)
+    inline ts::RTPFECDecoder::Datagram RTPFECDecoderTest::_MakePacket(uint16_t sequence, size_t ts_size, size_t count)
     {
-        Datagram packet; // Construct a complete wire packet rather than a decoder object.
-        packet.setArrival(_now()); // Each test decides which later arrivals or deadlines differ.
+        _Datagram packet; // Construct a complete wire packet rather than a decoder object.
+        packet.setArrival(_Now()); // Each test decides which later arrivals or deadlines differ.
         packet.setReceiveTimestamp(cn::microseconds(123456), ts::UDPSocket::TimeStampType::SOFTWARE); // Original kernel timestamps must survive buffering.
         packet.data().resize(12 + ts_size * count); // Support all mandatory 188/204-byte operating points.
         packet.data()[0] = 0x80; // Fixed RTP header: no padding, extension or CSRC.
@@ -69,7 +74,7 @@ namespace ts {
         ts::PutUInt16(packet.data().data() + 2, sequence); // The supplied sequence already includes wire wrap.
         // Exercise 32-bit RTP timestamp wrapping as well as payload recovery.
         ts::PutUInt32(packet.data().data() + 4, 0xFFFF0000 + static_cast<uint32_t>(sequence) * 900);
-        ts::PutUInt32(packet.data().data() + 8, _ssrc); // Use a nonzero media source identifier.
+        ts::PutUInt32(packet.data().data() + 8, _SSRC); // Use a nonzero media source identifier.
         for (size_t index = 12; index < packet.data().size(); ++index) {
             packet.data()[index] = static_cast<uint8_t>(sequence * 7 + index * 13); // Distinct payloads expose incorrect XOR or packet ordering.
         }
@@ -82,16 +87,16 @@ namespace ts {
         return packet;
     }
 
-    inline RTPFECDecoderTest::Media RTPFECDecoderTest::_makePackets(size_t count, uint16_t base, size_t ts_size, size_t ts_count)
+    inline RTPFECDecoderTest::_Media RTPFECDecoderTest::_MakePackets(size_t count, uint16_t base, size_t ts_size, size_t ts_count)
     {
-        Media packets;
+        _Media packets;
         for (size_t index = 0; index < count; ++index) {
-            packets.push_back(_makePacket(static_cast<uint16_t>(base + index), ts_size, ts_count)); // Casting deliberately wraps the RTP sequence.
+            packets.push_back(_MakePacket(static_cast<uint16_t>(base + index), ts_size, ts_count)); // Casting deliberately wraps the RTP sequence.
         }
         return packets;
     }
 
-    inline ts::RTPFECDecoder::Datagram RTPFECDecoderTest::_makeParity(const Media& media, size_t base, size_t offset, size_t count, bool row)
+    inline ts::RTPFECDecoder::Datagram RTPFECDecoderTest::_MakeParity(const _Media& media, size_t base, size_t offset, size_t count, bool row)
     {
         // ST 2022-1 section 8.4: SNBase + j * Offset, 0 <= j < NA.
         // Compute a separate wire packet without calling any decoder methods.
@@ -101,8 +106,8 @@ namespace ts {
         for (size_t index = 0; index < count; ++index) {
             length = std::max(length, media[base + index * offset].data().size() - 12);
         }
-        Datagram fec;
-        fec.setArrival(_now() + cn::milliseconds(10)); // Parity normally follows media, but tests may override it.
+        _Datagram fec;
+        fec.setArrival(_Now() + cn::milliseconds(10)); // Parity normally follows media, but tests may override it.
         fec.data().resize(28 + length, 0); // Zero padding, mask, type, index and SSRC fields.
         fec.data()[0] = 0x80; // Parity also has the fixed 12-byte RTP header.
         fec.data()[1] = 96; // ST 2022-1 uses the first dynamic RTP payload type.
@@ -127,7 +132,7 @@ namespace ts {
         return fec;
     }
 
-    inline void RTPFECDecoderTest::_send(Decoder& decoder, const Media& media, const std::set<size_t>& lost)
+    inline void RTPFECDecoderTest::_Send(_Decoder& decoder, const _Media& media, const std::set<size_t>& lost)
     {
         for (size_t index = 0; index < media.size(); ++index) {
             if (!lost.contains(index)) { // Drop originals before they can enter the decoder.
@@ -137,16 +142,16 @@ namespace ts {
         }
     }
 
-    inline void RTPFECDecoderTest::_checkOutput(Decoder& decoder, const Media& media, const std::set<size_t>& lost)
+    inline void RTPFECDecoderTest::_CheckOutput(_Decoder& decoder, const _Media& media, const std::set<size_t>& lost)
     {
-        Datagram output;
+        _Datagram output;
         // Nothing leaves before its deadline unless the finite window needs space.
         if (!decoder.isPlayoutBufferFull()) {
-            TSUNIT_ASSERT(!decoder.getDatagram(output, _now()));
+            TSUNIT_ASSERT(!decoder.getDatagram(output, _Now()));
         }
         for (size_t index = 0; index < media.size(); ++index) {
             if (!lost.contains(index)) { // Compare only media which are expected to survive the selected losses.
-                TSUNIT_ASSERT(decoder.getDatagram(output, _now() + cn::seconds(2)));
+                TSUNIT_ASSERT(decoder.getDatagram(output, _Now() + cn::seconds(2)));
                 TSUNIT_ASSERT(output.data() == media[index].data()); // Compare the whole RTP header and TS payload, not only sync.
                 if (output.isRecovered()) {
                     TSUNIT_EQUAL(-1, output.receiveTimestamp().count()); // A recovered datagram has no actual kernel reception.
@@ -158,6 +163,6 @@ namespace ts {
                 }
             }
         }
-        TSUNIT_ASSERT(!decoder.getDatagram(output, _now() + cn::seconds(2)));
+        TSUNIT_ASSERT(!decoder.getDatagram(output, _Now() + cn::seconds(2)));
     }
 }

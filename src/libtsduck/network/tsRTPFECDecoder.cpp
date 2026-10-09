@@ -47,6 +47,11 @@ namespace ts {
 
 
 
+// Anchor exported vtables in the library, including the values owned by public containers.
+ts::RTPFECDecoder::~RTPFECDecoder() = default;
+ts::RTPFECDecoder::Datagram::~Datagram() = default;
+ts::RTPFECDecoder::_FEC::~_FEC() = default;
+
 //----------------------------------------------------------------------------
 // Reset configuration, session and statistics.
 //----------------------------------------------------------------------------
@@ -110,7 +115,7 @@ int64_t ts::RTPFECDecoder::_extendSequence(uint16_t sequence) const
 // ST 2022-2 fixes all RTP fields not carried by the FEC recovery header.
 //----------------------------------------------------------------------------
 
-void ts::RTPFECDecoder::_reduce(FEC& fec, const Datagram& media) const
+void ts::RTPFECDecoder::_reduce(_FEC& fec, const Datagram& media) const
 {
     const size_t length = media.data().size() - RTP_HEADER_SIZE;
     fec._length ^= static_cast<uint16_t>(length);                     // Length recovery excludes the fixed RTP header.
@@ -183,10 +188,13 @@ bool ts::RTPFECDecoder::addFEC(const Datagram& datagram, bool row)
     const uint8_t offset = header[FEC_STRIDE_OFFSET];                  // Period between protected media sequences.
     const uint8_t count = header[FEC_COUNT_OFFSET];                   // NA: number of associated media packets.
     // E=1, mask=0, N/type/index/SNBase extension=0, and D matches its stream.
+    // Fixed media PT 33 also fixes its XOR: zero for even NA, or 33 for odd NA.
+    // Reject impossible recovery bits before they can affect startup ordering.
     // Rows protect consecutive media. Reject groups larger than our history.
     if ((header[FEC_PT_OFFSET] & FEC_EXTENSION_BIT) == 0 || GetUInt24(header + FEC_MASK_OFFSET) != 0 ||
         header[FEC_FLAGS_OFFSET] != (row ? FEC_ROW_BIT : 0) || header[FEC_SNBASE_EXT_OFFSET] != 0 || offset == 0 || count == 0 ||
-        (row && offset != 1) || static_cast<size_t>(count - 1) * offset >= _max_packets) {
+        (row && offset != 1) || (header[FEC_PT_OFFSET] & FEC_PT_MASK) != (count % 2 == 0 ? 0 : RTP_PT_MP2T) ||
+        static_cast<size_t>(count - 1) * offset >= _max_packets) {
         return false;
     }
     if (!_initialized) {
@@ -216,11 +224,11 @@ bool ts::RTPFECDecoder::_addEquation(const Datagram& datagram, bool row)
     if (base < _highest - static_cast<int64_t>(_max_packets) + 1 || end > _highest + static_cast<int64_t>(_max_packets) - 1) {
         return false;
     }
-    const FECKey key(base, offset, count, row);          // Independent equations may overlap in media space.
+    const _FECKey key(base, offset, count, row);          // Independent equations may overlap in media space.
     if (_fec.contains(key)) {
         return true;
     }
-    FEC fec;
+    _FEC fec;
     fec._length = GetUInt16(header + FEC_LENGTH_OFFSET);                 // XOR of protected payload lengths.
     fec._payload_type = header[FEC_PT_OFFSET] & FEC_PT_MASK;                // Strip E; these are recovery bits, not RTP's parity PT.
     fec._timestamp = GetUInt32(header + FEC_TIMESTAMP_OFFSET);             // Ignore the timestamp in the parity RTP header.
@@ -245,7 +253,7 @@ bool ts::RTPFECDecoder::_addEquation(const Datagram& datagram, bool row)
         ++_missing_references;                         // Bound overlapping equations under malformed traffic.
     }
     _fec.emplace(key, std::move(fec));                   // One owned copy of each incomplete equation.
-    ReadyMedia ready;
+    _ReadyMedia ready;
     _recover(key, ready);                               // An arriving equation may already have a single loss.
     while (!ready.empty()) {
         auto recovered = std::move(ready.front());
@@ -261,7 +269,7 @@ bool ts::RTPFECDecoder::_addEquation(const Datagram& datagram, bool row)
 // A missing member already emitted is final and cannot be reintroduced.
 //----------------------------------------------------------------------------
 
-bool ts::RTPFECDecoder::_reduceEquation(FEC& fec, int64_t base, uint8_t offset, uint8_t count)
+bool ts::RTPFECDecoder::_reduceEquation(_FEC& fec, int64_t base, uint8_t offset, uint8_t count)
 {
     const int64_t end = base + static_cast<int64_t>(count - 1) * offset;
     for (int64_t sequence = base; sequence <= end; sequence += offset) {
@@ -292,7 +300,7 @@ bool ts::RTPFECDecoder::_reduceEquation(FEC& fec, int64_t base, uint8_t offset, 
 
 void ts::RTPFECDecoder::_insertMedia(int64_t sequence, Datagram& datagram)
 {
-    ReadyMedia ready;
+    _ReadyMedia ready;
     ready.emplace_back(sequence, std::move(datagram));  // The same bounded work path handles all media.
     while (!ready.empty()) {
         auto item = std::move(ready.front());
@@ -339,13 +347,13 @@ void ts::RTPFECDecoder::_insertMedia(int64_t sequence, Datagram& datagram)
 // reconstructed RTP payload before allowing it to participate in more FEC.
 //----------------------------------------------------------------------------
 
-void ts::RTPFECDecoder::_recover(const FECKey& key, ReadyMedia& ready)
+void ts::RTPFECDecoder::_recover(const _FECKey& key, _ReadyMedia& ready)
 {
     const auto it = _fec.find(key);
     if (it == _fec.end() || it->second._missing.size() > 1) {
         return;
     }
-    const FEC& fec = it->second;
+    const _FEC& fec = it->second;
     if (!fec._missing.empty() && fec._length > 0 && fec._length <= fec._payload.size() && fec._payload_type == RTP_PT_MP2T) {
         const int64_t sequence = *fec._missing.begin();
         Datagram media;
@@ -371,7 +379,7 @@ void ts::RTPFECDecoder::_recover(const FECKey& key, ReadyMedia& ready)
 // Remove a parity group and its reverse references, including empty entries.
 //----------------------------------------------------------------------------
 
-void ts::RTPFECDecoder::_dropFEC(const FECKey& key)
+void ts::RTPFECDecoder::_dropFEC(const _FECKey& key)
 {
     const auto fec = _fec.find(key);
     if (fec != _fec.end()) {
@@ -405,7 +413,7 @@ void ts::RTPFECDecoder::_prune()
     // Already reduced parity can outlive its earliest known media in history.
     const int64_t expired = std::max(first, _next);     // A missing packet outside history or playout is final.
     while (!_waiting.empty() && _waiting.begin()->first < expired) {
-        const FECKey key(*_waiting.begin()->second.begin());
+        const _FECKey key(*_waiting.begin()->second.begin());
         _dropFEC(key);
     }
 }
@@ -442,5 +450,12 @@ cn::milliseconds ts::RTPFECDecoder::timeToNextDatagram(const TimePoint& now) con
     if (isPlayoutBufferFull() || media->second.arrival() + _latency <= now) {
         return cn::milliseconds::zero();
     }
-    return cn::ceil<cn::milliseconds>(media->second.arrival() + _latency - now); // Avoid a busy loop below one ms.
+    const auto deadline = media->second.arrival() + _latency;
+    // A caller can supply two valid clock values whose difference exceeds the duration type.
+    // Cap before subtraction, and keep the returned whole-millisecond wait representable by Clock.
+    const auto maximum = cn::floor<cn::milliseconds>(Clock::duration::max());
+    if (now < TimePoint() && deadline > TimePoint::max() + now.time_since_epoch()) {
+        return maximum;
+    }
+    return std::min(maximum, cn::ceil<cn::milliseconds>(deadline - now)); // Avoid a busy loop below one ms.
 }

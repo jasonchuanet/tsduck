@@ -49,7 +49,7 @@ namespace ts {
         UDPReceiver     _sock {this}; //!< Media UDP receiver.
 
         // FEC is optional. With FEC disabled, the original single-socket path is used.
-        size_t _fec_streams = 0;                 //!< Zero when disabled, two when enabled; row traffic may be absent.
+        bool _fec_enabled = false;              //!< Both parity sockets are enabled together; a 1D sender need not send rows.
         size_t _fec_buffer_size = RTPFECDecoder::DEFAULT_BUFFER_SIZE; //!< A datagram window, not the socket's byte buffer.
         cn::milliseconds _fec_latency {RTPFECDecoder::DEFAULT_LATENCY}; //!< Covers parity transmission and network jitter.
         UDPReceiver _column_sock {this}; //!< Column parity receiver on media port plus two.
@@ -64,63 +64,63 @@ namespace ts {
         // UDPReceiver's source, multicast, timeout and kernel timestamp handling on all OS's.
         // Strong stream identifiers prevent mixing direction with queue capacity.
         //! Identify the receiving socket independently of parity header contents.
-        enum class Stream {
+        enum class _Stream {
             MEDIA, //!< Original media stream.
             COLUMN, //!< Column parity stream.
             ROW, //!< Row parity stream.
         };
         //! Queued RTP data with the socket source and end-of-input marker.
-        class Datagram: public RTPFECDecoder::Datagram
+        class _Datagram: public RTPFECDecoder::Datagram
         {
             friend class IPInputPlugin;
         public:
             //! Media wire data and receive metadata.
             using SuperClass = RTPFECDecoder::Datagram;
             //! Default constructor.
-            Datagram() = default;
+            _Datagram() = default;
             //! Copy constructor.
             //! @param [in] other Queued datagram to copy.
-            Datagram(const Datagram& other) = default;
+            _Datagram(const _Datagram& other) = default;
             //! Destructor.
-            virtual ~Datagram() override = default;
+            virtual ~_Datagram() override;
             //! Copy assignment.
             //! @param [in] other Queued datagram to copy.
             //! @return A reference to this object.
-            Datagram& operator=(const Datagram& other) = default;
+            _Datagram& operator=(const _Datagram& other) = default;
         private:
-            Stream _stream = Stream::MEDIA; //!< Parity direction is independent of FEC's media sequence.
+            _Stream _stream = _Stream::MEDIA; //!< Parity direction is independent of FEC's media sequence.
             IPSocketAddress _sender {};    //!< Source port pins media; only the IP address pins parity.
             bool _end = false;             //!< A unique end marker wakes a waiting input consumer.
         };
-        MessageQueue<Datagram> _queue {}; //!< Bounded shared queue merging enabled receive streams.
-        std::deque<std::shared_ptr<Datagram>> _early_fec {}; //!< Bounded parity received before media source association.
+        MessageQueue<_Datagram> _queue {}; //!< Bounded shared queue merging enabled receive streams.
+        std::deque<std::shared_ptr<_Datagram>> _early_fec {}; //!< Bounded parity received before media source association.
 
         //! One socket worker; the decoder remains exclusively on the input thread.
-        class Receiver: public Thread
+        class _Receiver: public Thread
         {
-            TS_NOCOPY(Receiver);
+            TS_NOCOPY(_Receiver);
         public:
             //! Thread lifecycle implementation.
             using SuperClass = Thread;
             //! Default construction is disabled: a worker requires its owning plugin.
-            Receiver() = delete;
+            _Receiver() = delete;
             //! Constructor; the explicit stack size leaves the large receive buffer on the heap.
             //! @param [in,out] plugin Plugin whose queue receives datagrams.
             //! @param [in,out] socket Socket to receive from until closed.
             //! @param [in] stream Identity of the receiving socket.
-            Receiver(IPInputPlugin& plugin, UDPReceiver& socket, Stream stream);
+            _Receiver(IPInputPlugin& plugin, UDPReceiver& socket, _Stream stream);
             //! Destructor; joins the worker before its fields are destroyed.
-            virtual ~Receiver() override;
+            virtual ~_Receiver() override;
         private:
             IPInputPlugin& _plugin; //!< Owning plugin, which outlives this worker.
             UDPReceiver& _socket; //!< Receiver socket closed before joining this worker.
-            const Stream _stream; //!< Identity of the worker socket.
+            const _Stream _stream; //!< Identity of the worker socket.
             //! Receive bounded wire datagrams and retain their kernel metadata.
             virtual void main() override;
         };
-        Receiver _media_receiver {*this, _sock, Stream::MEDIA}; //!< Media UDP receiver.
-        Receiver _column_receiver {*this, _column_sock, Stream::COLUMN}; //!< Column parity receiver on media port plus two.
-        Receiver _row_receiver {*this, _row_sock, Stream::ROW}; //!< Optional row parity receiver on media port plus four.
+        _Receiver _media_receiver {*this, _sock, _Stream::MEDIA}; //!< Media UDP receiver.
+        _Receiver _column_receiver {*this, _column_sock, _Stream::COLUMN}; //!< Column parity receiver on media port plus two.
+        _Receiver _row_receiver {*this, _row_sock, _Stream::ROW}; //!< Optional row parity receiver on media port plus four.
 
         //! Close open sockets, join workers, and release queued storage; repeatable.
         void _closeReceivers();
@@ -135,7 +135,7 @@ namespace ts {
         bool _receiveFEC(uint8_t* buffer, size_t buffer_size, size_t& ret_size, cn::microseconds& timestamp, TimeSource& timesource);
         //! Associate queued data with its media session, then ingest it.
         //! @param [in] datagram Queued wire data or an end marker; ownership remains shared.
-        void _processDatagram(const std::shared_ptr<Datagram>& datagram);
+        void _processDatagram(const std::shared_ptr<_Datagram>& datagram);
 
         //! Map UDP receive metadata consistently on direct and FEC input.
         //! @param [in] type Kernel timestamp clock type.

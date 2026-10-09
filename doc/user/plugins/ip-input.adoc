@@ -49,6 +49,8 @@ Choose `--smpte-2022-fec-latency` to cover the sender's FEC delay and network ji
 For block-aligned FEC, allow approximately two matrices of media transmission time, plus network jitter.
 For staggered columns, allow approximately one matrix of media transmission time, plus network jitter.
 The default latency is one second.
+Reception tolerates varying RTP payload sizes, including short final bursts, although ST 2022-2 requires a constant TS packet count
+and TS packet length during a send-receive session.
 The sequence window set by `--smpte-2022-fec-buffer-size` must also accommodate the media rate over this delay and the FEC history.
 If the window fills, older media are released before their deadline and recovery may be reduced.
 At verbose level the plugin reports recovered and unrecoverable RTP datagram counts when stopping.

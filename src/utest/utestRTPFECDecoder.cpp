@@ -30,31 +30,31 @@ namespace ts {
 
     TSUNIT_DEFINE_TEST(Column)
     {
-        Decoder decoder;
-        const Media media(_makePackets(16)); // A 4x4 source block with uniquely identifiable packets.
-        _send(decoder, media, {5}); // Remove an interior column member, preserving both neighbors.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 1, 4, 4), false));
+        _Decoder decoder;
+        const _Media media(_MakePackets(16)); // A 4x4 source block with uniquely identifiable packets.
+        _Send(decoder, media, {5}); // Remove an interior column member, preserving both neighbors.
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 1, 4, 4), false));
         TSUNIT_EQUAL(1, decoder.recoveredPackets()); // A singleton recovery must be counted exactly once.
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
         TSUNIT_EQUAL(0, decoder.lostPackets()); // Recovery or buffer pressure must not silently lose media.
     }
 
     TSUNIT_DEFINE_TEST(Iterative)
     {
-        Decoder decoder;
-        const Media media(_makePackets(16)); // A 4x4 source block with uniquely identifiable packets.
-        _send(decoder, media, {1, 5, 6}); // These losses require alternating row and column recovery.
+        _Decoder decoder;
+        const _Media media(_MakePackets(16)); // A 4x4 source block with uniquely identifiable packets.
+        _Send(decoder, media, {1, 5, 6}); // These losses require alternating row and column recovery.
         // These two equations cannot be solved until row zero recovers packet 1.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 1, 4, 4), false));
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 4, 1, 4, true), true));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 1, 4, 4), false));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 4, 1, 4, true), true));
         TSUNIT_EQUAL(0, decoder.recoveredPackets()); // No underdetermined or invalid equation may produce media.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
         TSUNIT_EQUAL(3, decoder.recoveredPackets()); // All three intended iterative losses were reconstructed.
         // Repeated parity and late originals cannot create repeated output.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
-        _send(decoder, media);
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
+        _Send(decoder, media);
         TSUNIT_EQUAL(3, decoder.recoveredPackets()); // All three intended iterative losses were reconstructed.
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
     }
 
     TSUNIT_DEFINE_TEST(MandatoryMatrices)
@@ -62,43 +62,43 @@ namespace ts {
         // Every mandatory ST 2022-2 operating point, with a full L-packet burst loss.
         for (size_t columns = 1; columns <= 20; ++columns) {
             for (size_t rows = 4; rows <= 20 && rows * columns <= 100; ++rows) {
-                Decoder decoder;
-                const Media media(_makePackets(columns * rows, 65500));
+                _Decoder decoder;
+                const _Media media(_MakePackets(columns * rows, 65500));
                 std::set<size_t> lost;
                 for (size_t column = 0; column < columns; ++column) {
                     lost.insert(2 * columns + column); // A whole interior row is one loss per column.
                 }
-                _send(decoder, media, lost);
+                _Send(decoder, media, lost);
                 for (size_t column = 0; column < columns; ++column) {
-                    TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, column, columns, rows), false));
+                    TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, column, columns, rows), false));
                 }
                 TSUNIT_EQUAL(columns, decoder.recoveredPackets());
-                _checkOutput(decoder, media);
+                _CheckOutput(decoder, media);
             }
         }
     }
 
     TSUNIT_DEFINE_TEST(StaggeredColumns)
     {
-        Decoder decoder;
-        const Media media(_makePackets(24)); // Enough media for staggered columns extending into later rows.
-        _send(decoder, media, {4, 9, 14, 19}); // Lose one member of each independently staggered column.
+        _Decoder decoder;
+        const _Media media(_MakePackets(24)); // Enough media for staggered columns extending into later rows.
+        _Send(decoder, media, {4, 9, 14, 19}); // Lose one member of each independently staggered column.
         // The Annex B style columns begin in different rows, without block alignment.
         for (size_t base = 0; base < 4; ++base) {
-            TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, base * 5, 4, 3), false));
+            TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, base * 5, 4, 3), false));
         }
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
         TSUNIT_EQUAL(4, decoder.recoveredPackets());
     }
 
     TSUNIT_DEFINE_TEST(EarlyParity)
     {
-        Decoder decoder;
-        const Media media(_makePackets(4));
+        _Decoder decoder;
+        const _Media media(_MakePackets(4));
         // Parity arrives first, and a missing leading packet must also be recovered.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
-        _send(decoder, media, {0});
-        _checkOutput(decoder, media);
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
+        _Send(decoder, media, {0});
+        _CheckOutput(decoder, media);
         TSUNIT_EQUAL(1, decoder.recoveredPackets()); // A singleton recovery must be counted exactly once.
     }
 
@@ -109,19 +109,19 @@ namespace ts {
 
     TSUNIT_DEFINE_TEST(WrapAndReorder)
     {
-        Decoder decoder;
-        const Media media(_makePackets(8, 65532)); // Four packets before wrap and four after it.
+        _Decoder decoder;
+        const _Media media(_MakePackets(8, 65532)); // Four packets before wrap and four after it.
         // Reorder across wrap and repeat originals before and after recovery.
-        for (const size_t index : {2, 0, 1, 6, 4, 7, 3, 6}) {
+        for (const size_t& index : std::initializer_list<size_t> {2, 0, 1, 6, 4, 7, 3, 6}) {
             auto copy = media[index]; // Keep the independent expected wire packet intact.
             TSUNIT_ASSERT(decoder.addMedia(copy));
         }
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 4, 1, 4, true), true));
-        _checkOutput(decoder, media);
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 4, 1, 4, true), true));
+        _CheckOutput(decoder, media);
         auto late = media[5]; // A recovered original can arrive after all output has drained.
         TSUNIT_ASSERT(decoder.addMedia(late));
-        Datagram output;
-        TSUNIT_ASSERT(!decoder.getDatagram(output, _now() + cn::seconds(3)));
+        _Datagram output;
+        TSUNIT_ASSERT(!decoder.getDatagram(output, _Now() + cn::seconds(3)));
     }
 
     TSUNIT_DEFINE_TEST(LengthsAndRS204)
@@ -129,34 +129,34 @@ namespace ts {
         // All mandatory TS counts with both 188-byte and RS204 payloads.
         for (const size_t& ts_size : std::initializer_list<size_t> {188, 204}) {
             for (const size_t& count : std::initializer_list<size_t> {1, 4, 7}) {
-                Decoder decoder;
-                const Media media(_makePackets(16, 1000, ts_size, count));
-                _send(decoder, media, {8}); // Recover the same position at every mandatory TS payload size.
-                TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 4, 4), false));
-                _checkOutput(decoder, media);
+                _Decoder decoder;
+                const _Media media(_MakePackets(16, 1000, ts_size, count));
+                _Send(decoder, media, {8}); // Recover the same position at every mandatory TS payload size.
+                TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 4, 4), false));
+                _CheckOutput(decoder, media);
             }
         }
         // Different lengths also exercise length recovery and zero-extension.
-        Decoder decoder;
-        const Media media {_makePacket(1000, 188, 1), _makePacket(1001, 188, 7), _makePacket(1002, 188, 4)};
-        _send(decoder, media, {0});
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 3, true), true));
-        _checkOutput(decoder, media);
+        _Decoder decoder;
+        const _Media media {_MakePacket(1000, 188, 1), _MakePacket(1001, 188, 7), _MakePacket(1002, 188, 4)};
+        _Send(decoder, media, {0});
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 3, true), true));
+        _CheckOutput(decoder, media);
     }
 
     TSUNIT_DEFINE_TEST(Unrecoverable)
     {
-        Decoder decoder;
-        const Media media(_makePackets(16)); // A 4x4 source block with uniquely identifiable packets.
+        _Decoder decoder;
+        const _Media media(_MakePackets(16)); // A 4x4 source block with uniquely identifiable packets.
         const std::set<size_t> lost {5, 6, 9, 10}; // Two losses in each affected row and column.
-        _send(decoder, media, lost);
+        _Send(decoder, media, lost);
         // A rectangle has two losses in each affected row and column.
         for (size_t index = 0; index < 4; ++index) {
-            TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, index, 4, 4), false));
-            TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, index * 4, 1, 4, true), true));
+            TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, index, 4, 4), false));
+            TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, index * 4, 1, 4, true), true));
         }
         TSUNIT_EQUAL(0, decoder.recoveredPackets()); // No underdetermined or invalid equation may produce media.
-        _checkOutput(decoder, media, lost);
+        _CheckOutput(decoder, media, lost);
         TSUNIT_EQUAL(4, decoder.lostPackets()); // All rectangle gaps must eventually expire.
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Completed, expired or reset equations release their storage.
     }
@@ -164,17 +164,17 @@ namespace ts {
     TSUNIT_DEFINE_TEST(LateParity)
     {
         // Expired gaps cannot be undone or emitted a second time.
-        Decoder decoder;
-        const Media media(_makePackets(4));
-        _send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
-        TSUNIT_EQUAL(1000, decoder.timeToNextDatagram(_now()).count());
-        TSUNIT_EQUAL(1, decoder.timeToNextDatagram(_now() + cn::microseconds(999001)).count());
-        _checkOutput(decoder, media, {1});
+        _Decoder decoder;
+        const _Media media(_MakePackets(4));
+        _Send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
+        TSUNIT_EQUAL(1000, decoder.timeToNextDatagram(_Now()).count());
+        TSUNIT_EQUAL(1, decoder.timeToNextDatagram(_Now() + cn::microseconds(999001)).count());
+        _CheckOutput(decoder, media, {1});
         TSUNIT_EQUAL(1, decoder.lostPackets()); // Late parity must not undo already reported media loss.
         // Past its deadline, missing media cannot be reinserted into playout.
-        TSUNIT_ASSERT(!decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
+        TSUNIT_ASSERT(!decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
         TSUNIT_EQUAL(0, decoder.recoveredPackets()); // No underdetermined or invalid equation may produce media.
-        TSUNIT_ASSERT(decoder.timeToNextDatagram(_now()) == cn::milliseconds::max());
+        TSUNIT_ASSERT(decoder.timeToNextDatagram(_Now()) == cn::milliseconds::max());
     }
 
 
@@ -185,10 +185,10 @@ namespace ts {
     TSUNIT_DEFINE_TEST(InvalidPackets)
     {
         // Each independent header restriction is tested before accepting valid parity.
-        Decoder decoder;
-        const Media media(_makePackets(4));
-        _send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
-        const Datagram good(_makeParity(media, 0, 1, 4, true));
+        _Decoder decoder;
+        const _Media media(_MakePackets(4));
+        _Send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
+        const _Datagram good(_MakeParity(media, 0, 1, 4, true));
         for (size_t size = 0; size <= 28; ++size) {
             auto bad = good;
             bad.data().resize(size); // Truncate at every boundary of the RTP and FEC headers.
@@ -198,14 +198,14 @@ namespace ts {
         // index, row offset, NA and SNBase extension must all be checked.
         for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {
                  {0, 0x40}, {0, 0xA0}, {0, 0x90}, {0, 0x81}, {1, 97}, {8, 1},
-                 {16, 0}, {17, 1}, {24, 0xC0}, {24, 0}, {24, 0x48}, {24, 0x41},
+                 {16, 0}, {16, 0xFF}, {17, 1}, {24, 0xC0}, {24, 0}, {24, 0x48}, {24, 0x41},
                  {25, 0}, {25, 2}, {26, 0}, {27, 1}}) {
             auto bad = good;
             bad.data()[field.first] = field.second; // Change one field while keeping the rest of the packet valid.
             TSUNIT_ASSERT(!decoder.addFEC(bad, true));
         }
-        // Valid headers with invalid recovery length, PT or TS sync cannot poison media.
-        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{14, 0xFF}, {16, 0xFF}, {28, 0xFF}}) {
+        // Valid headers with invalid recovery length or TS sync cannot poison media.
+        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{14, 0xFF}, {28, 0xFF}}) {
             auto bad = good;
             bad.data()[field.first] = field.second; // Change one field while keeping the rest of the packet valid.
             TSUNIT_ASSERT(decoder.addFEC(bad, true));
@@ -217,27 +217,27 @@ namespace ts {
             TSUNIT_ASSERT(!decoder.addMedia(bad));
         }
         TSUNIT_ASSERT(decoder.addFEC(good, true));
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
     }
 
     TSUNIT_DEFINE_TEST(Bounds)
     {
         // Stalled consumers must have a finite, observable history bound.
-        Decoder decoder;
+        _Decoder decoder;
         decoder.reset(cn::seconds(60), 256); // Large latency forces the sequence-window limit to take effect.
         // A non-consuming receiver cannot retain unlimited media.
         for (uint16_t sequence = 0; sequence < 2000; ++sequence) {
-            auto packet = _makePacket(sequence);
+            auto packet = _MakePacket(sequence);
             TSUNIT_ASSERT(decoder.addMedia(packet));
             TSUNIT_ASSERT(decoder.bufferedMedia() <= 256);
         }
-        Datagram output;
-        TSUNIT_ASSERT(decoder.getDatagram(output, _now()));
+        _Datagram output;
+        TSUNIT_ASSERT(decoder.getDatagram(output, _Now()));
         TSUNIT_EQUAL(1744, ts::GetUInt16(output.data().data() + 2)); // Only the newest 256 media remain after a stalled consumer.
         TSUNIT_EQUAL(1744, decoder.lostPackets()); // Overwritten original media are included in gap accounting.
         // A far-future, stale or overlong FEC equation is rejected without buffering.
-        const Media future(_makePackets(300, 4000)); // This parity is outside the receiver sequence window.
-        TSUNIT_ASSERT(!decoder.addFEC(_makeParity(future, 0, 1, 4, true), true));
+        const _Media future(_MakePackets(300, 4000)); // This parity is outside the receiver sequence window.
+        TSUNIT_ASSERT(!decoder.addFEC(_MakeParity(future, 0, 1, 4, true), true));
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Completed, expired or reset equations release their storage.
         decoder.reset();
         TSUNIT_EQUAL(0, decoder.bufferedMedia());
@@ -247,70 +247,70 @@ namespace ts {
     TSUNIT_DEFINE_TEST(Restart)
     {
         // Parity from an old SSRC must not reconstruct media in the new session.
-        Decoder decoder;
-        const Media media(_makePackets(4));
-        _send(decoder, media, {1, 2}); // Both equations initially have two unknown members.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
+        _Decoder decoder;
+        const _Media media(_MakePackets(4));
+        _Send(decoder, media, {1, 2}); // Both equations initially have two unknown members.
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
         TSUNIT_EQUAL(1, decoder.bufferedFEC());
-        auto fresh = _makePacket(50); // The restarted session can use a completely different sequence.
-        ts::PutUInt32(fresh.data().data() + 8, _ssrc + 1); // A new SSRC must not inherit old equations.
+        auto fresh = _MakePacket(50); // The restarted session can use a completely different sequence.
+        ts::PutUInt32(fresh.data().data() + 8, _SSRC + 1); // A new SSRC must not inherit old equations.
         const auto expected = fresh;
         TSUNIT_ASSERT(decoder.addMedia(fresh));
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Completed, expired or reset equations release their storage.
-        _checkOutput(decoder, {expected});
+        _CheckOutput(decoder, {expected});
     }
 
     TSUNIT_DEFINE_TEST(ParityBounds)
     {
         // Payload bounds alone do not bound overlapping reverse references.
-        Decoder decoder;
+        _Decoder decoder;
         decoder.reset(cn::seconds(1), 256); // Use the minimum buffer to make flood bounds observable.
-        const Media media(_makePackets(256));
+        const _Media media(_MakePackets(256));
         auto first = media.front();
         TSUNIT_ASSERT(decoder.addMedia(first));
         size_t accepted = 0; // Count accepted overlap separately from media recovery.
         // Overlapping incomplete equations also bound their reverse index, not
         // just parity payload storage. Normal FEC has at most two references per media.
         for (size_t base = 0; base < 252; ++base) {
-            accepted += decoder.addFEC(_makeParity(media, base, 1, 4), false) ? 1 : 0;
+            accepted += decoder.addFEC(_MakeParity(media, base, 1, 4), false) ? 1 : 0;
             TSUNIT_ASSERT(decoder.bufferedFEC() <= 128);
         }
         TSUNIT_ASSERT(accepted > 0 && accepted < 252);
         // Completing the equations must release every reverse reference safely.
-        _send(decoder, media);
+        _Send(decoder, media);
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Completed, expired or reset equations release their storage.
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
 
         // Before sequence anchoring, even a flood of duplicated parity is bounded.
         decoder.reset(cn::seconds(1), 256); // Use the minimum buffer to make flood bounds observable.
-        const Media small(_makePackets(4));
-        const auto parity = _makeParity(small, 0, 1, 4, true);
+        const _Media small(_MakePackets(4));
+        const auto parity = _MakeParity(small, 0, 1, 4, true);
         for (size_t index = 0; index < 1000; ++index) {
             TSUNIT_ASSERT(decoder.addFEC(parity, true) == (index < 256));
             TSUNIT_ASSERT(decoder.bufferedFEC() <= 256);
         }
-        _send(decoder, small, {1});
-        _checkOutput(decoder, small);
+        _Send(decoder, small, {1});
+        _CheckOutput(decoder, small);
         TSUNIT_EQUAL(1, decoder.recoveredPackets()); // A singleton recovery must be counted exactly once.
     }
 
     TSUNIT_DEFINE_TEST(History)
     {
         // Playout completion is different from history expiry for later parity.
-        Decoder decoder;
+        _Decoder decoder;
         decoder.reset(cn::milliseconds(100));
-        Media media(_makePackets(4));
+        _Media media(_MakePackets(4));
         media[2].setArrival(media[2].arrival() + cn::milliseconds(100)); // Later media establish a later deadline for the missing gap.
         media[3].setArrival(media[3].arrival() + cn::milliseconds(100)); // The first played packet must remain available as history.
-        _send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
-        Datagram output;
+        _Send(decoder, media, {1}); // A single gap whose expiry can be checked precisely.
+        _Datagram output;
         // Packet zero leaves playout before column parity arrives, but must remain
         // in history so that packet one can still be recovered before the gap expires.
-        TSUNIT_ASSERT(decoder.getDatagram(output, _now() + cn::milliseconds(100)));
+        TSUNIT_ASSERT(decoder.getDatagram(output, _Now() + cn::milliseconds(100)));
         TSUNIT_ASSERT(output.data() == media[0].data()); // The first original has already left playout.
-        TSUNIT_ASSERT(!decoder.getDatagram(output, _now() + cn::milliseconds(150)));
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4), false));
-        TSUNIT_ASSERT(decoder.getDatagram(output, _now() + cn::milliseconds(150)));
+        TSUNIT_ASSERT(!decoder.getDatagram(output, _Now() + cn::milliseconds(150)));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4), false));
+        TSUNIT_ASSERT(decoder.getDatagram(output, _Now() + cn::milliseconds(150)));
         TSUNIT_ASSERT(output.data() == media[1].data()); // The next output must be the recovered missing member.
         TSUNIT_EQUAL(0, decoder.lostPackets()); // Recovery or buffer pressure must not silently lose media.
     }
@@ -318,32 +318,32 @@ namespace ts {
     TSUNIT_DEFINE_TEST(LongRun)
     {
         // Exercise ongoing recovery over more than a full sequence cycle.
-        Decoder decoder;
+        _Decoder decoder;
         decoder.reset(cn::milliseconds(10), 256); // Continuously drain a small window over multiple RTP cycles.
         size_t emitted = 0;
         const size_t groups = 17500; // Seventy thousand media starting near the wrap boundary.
-        auto drain = [&](const Decoder::TimePoint& now) {
-            Datagram output;
+        auto drain = [&](const _Decoder::TimePoint& now) {
+            _Datagram output;
             while (decoder.getDatagram(output, now)) {
                 // More than a full sequence cycle must preserve exact packet order.
-                TSUNIT_ASSERT(output.data() == _makePacket(static_cast<uint16_t>(65000 + emitted)).data());
+                TSUNIT_ASSERT(output.data() == _MakePacket(static_cast<uint16_t>(65000 + emitted)).data());
                 ++emitted;
             }
         };
         for (size_t group = 0; group < groups; ++group) {
-            Media media(_makePackets(4, static_cast<uint16_t>(65000 + 4 * group)));
+            _Media media(_MakePackets(4, static_cast<uint16_t>(65000 + 4 * group)));
             for (size_t index = 0; index < 4; ++index) {
                 media[index].setArrival(media[index].arrival() + cn::milliseconds(4 * group + index));
             }
             const bool lost = group % 8 == 0; // A regular sparse loss pattern with a known recovery count.
-            _send(decoder, media, lost ? std::set<size_t> {1} : std::set<size_t> {});
-            auto parity = _makeParity(media, 0, 1, 4, true);
-            parity.setArrival(_now() + cn::milliseconds(4 * group + 4));
+            _Send(decoder, media, lost ? std::set<size_t> {1} : std::set<size_t> {});
+            auto parity = _MakeParity(media, 0, 1, 4, true);
+            parity.setArrival(_Now() + cn::milliseconds(4 * group + 4));
             TSUNIT_ASSERT(decoder.addFEC(parity, true));
             drain(parity.arrival()); // Advance monotonic time while continuing to receive media.
             TSUNIT_ASSERT(decoder.bufferedMedia() <= 256);
         }
-        drain(_now() + cn::seconds(1000)); // Drain the finite tail without sleeping.
+        drain(_Now() + cn::seconds(1000)); // Drain the finite tail without sleeping.
         TSUNIT_EQUAL(4 * groups, emitted); // Every original sequence must appear exactly once.
         TSUNIT_EQUAL((groups + 7) / 8, decoder.recoveredPackets()); // One recovery for each selected group.
         TSUNIT_EQUAL(0, decoder.lostPackets()); // Recovery or buffer pressure must not silently lose media.
@@ -352,55 +352,103 @@ namespace ts {
     TSUNIT_DEFINE_TEST(DuplicateEquations)
     {
         // Concurrent singleton equations must not duplicate their common solution.
-        Decoder decoder;
-        const Media media(_makePackets(4));
-        _send(decoder, media, {1, 2}); // Both equations initially have two unknown members.
+        _Decoder decoder;
+        const _Media media(_MakePackets(4));
+        _Send(decoder, media, {1, 2}); // Both equations initially have two unknown members.
         // Two overlapping equations become solvable on the same media insertion.
         // They must count and insert their common recovered packet only once.
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4), false));
-        TSUNIT_ASSERT(decoder.addFEC(_makeParity(media, 0, 1, 4, true), true));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4), false));
+        TSUNIT_ASSERT(decoder.addFEC(_MakeParity(media, 0, 1, 4, true), true));
         auto original = media[1]; // One known member makes both pending equations solvable.
         TSUNIT_ASSERT(decoder.addMedia(original));
         TSUNIT_EQUAL(1, decoder.recoveredPackets()); // A singleton recovery must be counted exactly once.
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Completed, expired or reset equations release their storage.
-        _checkOutput(decoder, media);
+        _CheckOutput(decoder, media);
     }
 
     TSUNIT_DEFINE_TEST(RejectedParity)
     {
         // Deep validation must be transactional with respect to startup ordering.
-        Decoder decoder;
-        const Media media(_makePackets(8));
-        const Media tail(media.begin() + 4, media.end());
+        _Decoder decoder;
+        const _Media media(_MakePackets(8));
+        const _Media tail(media.begin() + 4, media.end());
         auto invalid_clock = media[0];
-        invalid_clock.setArrival(Decoder::TimePoint::max()); // A deadline must not overflow the clock representation.
+        invalid_clock.setArrival(_Decoder::TimePoint::max()); // A deadline must not overflow the clock representation.
         TSUNIT_ASSERT(!decoder.addMedia(invalid_clock));
-        auto invalid_parity_clock = _makeParity(media, 0, 1, 8, true);
-        invalid_parity_clock.setArrival(Decoder::TimePoint::max());
+        auto invalid_parity_clock = _MakeParity(media, 0, 1, 8, true);
+        invalid_parity_clock.setArrival(_Decoder::TimePoint::max());
         TSUNIT_ASSERT(!decoder.addFEC(invalid_parity_clock, true));
-        _send(decoder, tail); // Startup is anchored by actual media, not unsupported parity.
-        auto bad = _makeParity(media, 0, 1, 8, true);
+        _Send(decoder, tail); // Startup is anchored by actual media, not unsupported parity.
+        auto bad = _MakeParity(media, 0, 1, 8, true);
         bad.data().resize(28 + 100); // Shorter than each known associated media payload.
         TSUNIT_ASSERT(!decoder.addFEC(bad, true));
-        _checkOutput(decoder, tail);
+        _CheckOutput(decoder, tail);
         TSUNIT_EQUAL(0, decoder.lostPackets()); // Rejection must not invent leading losses.
         TSUNIT_EQUAL(0, decoder.bufferedFEC()); // Nor may it leave partial reverse references.
+    }
+
+    TSUNIT_DEFINE_TEST(ParityPayloadType)
+    {
+        // XOR of fixed PT 33 is zero for even NA, or 33 for odd NA, in either direction.
+        // Column and row sockets must apply the same profile restriction.
+        for (const bool& row : {false, true}) {
+            // Both valid XOR values are covered, not just a malformed E bit or outer RTP PT.
+            for (const size_t& count : {size_t(4), size_t(5)}) {
+                _Decoder decoder;
+                // One unknown member makes the accepted equation immediately solvable.
+                const _Media media(_MakePackets(count));
+                const auto good = _MakeParity(media, 0, 1, count, row);
+                auto bad = good;
+                bad.data()[16] ^= 1; // Keep E set while making PT recovery impossible for the profile.
+                TSUNIT_ASSERT(!decoder.addFEC(bad, row)); // Invalid early parity must not acquire storage or an anchor.
+                TSUNIT_EQUAL(0, decoder.bufferedFEC());
+                _Send(decoder, media, {1});
+                TSUNIT_ASSERT(!decoder.addFEC(bad, row)); // Anchored validation must apply the same restriction.
+                TSUNIT_EQUAL(0, decoder.bufferedFEC());
+                TSUNIT_ASSERT(decoder.addFEC(good, row));
+                _CheckOutput(decoder, media); // Rejection must leave valid recovery and startup ordering intact.
+                TSUNIT_EQUAL(1, decoder.recoveredPackets());
+                TSUNIT_EQUAL(0, decoder.lostPackets());
+            }
+        }
+    }
+
+    TSUNIT_DEFINE_TEST(ClockBounds)
+    {
+        // A representable arrival and deadline can still have an unrepresentable difference from now.
+        _Decoder decoder;
+        auto media = _MakePacket(1000);
+        const auto expected = media.data(); // Ingestion transfers storage; retain an independent output oracle.
+        const auto arrival = _Decoder::TimePoint::max() - _Decoder::DEFAULT_LATENCY;
+        media.setArrival(arrival);
+        TSUNIT_ASSERT(decoder.addMedia(media));
+        // Flooring also keeps conversion of the returned wait back to Clock::duration in range.
+        const auto maximum = cn::floor<cn::milliseconds>(_Decoder::Clock::duration::max());
+        TSUNIT_EQUAL(maximum.count(), decoder.timeToNextDatagram(_Decoder::TimePoint::min()).count());
+        TSUNIT_EQUAL(_Decoder::DEFAULT_LATENCY.count(), decoder.timeToNextDatagram(arrival).count());
+        // Rounding up preserves sub-millisecond waits instead of causing a busy loop.
+        TSUNIT_EQUAL(1, decoder.timeToNextDatagram(_Decoder::TimePoint::max() - cn::nanoseconds(1)).count());
+        _Datagram output;
+        TSUNIT_ASSERT(!decoder.getDatagram(output, arrival)); // A capped wait must not release future media early.
+        TSUNIT_EQUAL(0, decoder.timeToNextDatagram(_Decoder::TimePoint::max()).count());
+        TSUNIT_ASSERT(decoder.getDatagram(output, _Decoder::TimePoint::max()));
+        TSUNIT_ASSERT(output.data() == expected);
     }
 
     TSUNIT_DEFINE_TEST(Pressure)
     {
         // A finite window must shorten delay before overwriting pending originals.
-        Decoder decoder;
+        _Decoder decoder;
         decoder.reset(cn::seconds(60), 256); // Large latency forces the sequence-window limit to take effect.
-        const Media media(_makePackets(1024)); // Four complete sequence windows with no network loss.
+        const _Media media(_MakePackets(1024)); // Four complete sequence windows with no network loss.
         size_t emitted = 0;
-        Datagram output;
+        _Datagram output;
         for (const auto& packet : media) {
             auto copy = packet;
             TSUNIT_ASSERT(decoder.addMedia(copy));
             // Drain at the window boundary before new input can overwrite history.
             // A too-small buffer shortens latency without losing original media.
-            while (decoder.getDatagram(output, _now())) {
+            while (decoder.getDatagram(output, _Now())) {
                 TSUNIT_ASSERT(emitted < media.size());
                 TSUNIT_ASSERT(output.data() == media[emitted].data());
                 ++emitted;
@@ -408,7 +456,7 @@ namespace ts {
             TSUNIT_ASSERT(!decoder.isPlayoutBufferFull()); // Playout must release enough space before the next insertion.
             TSUNIT_ASSERT(decoder.bufferedMedia() <= 256);
         }
-        while (decoder.getDatagram(output, _now() + cn::seconds(61))) {
+        while (decoder.getDatagram(output, _Now() + cn::seconds(61))) {
             TSUNIT_ASSERT(emitted < media.size());
             TSUNIT_ASSERT(output.data() == media[emitted].data());
             ++emitted;

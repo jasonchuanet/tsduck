@@ -16,11 +16,11 @@ namespace ts {
         constexpr size_t MAX_STREAMS = 2; // One column stream and one optional row stream.
         constexpr uint16_t PORT_STEP = 2; // Leave each RTP stream's adjacent RTCP port available.
         constexpr uint16_t MAX_PORT = 65535; // Validate before narrowing destination port arithmetic.
-        constexpr int DISABLED = 0; // Match the established dektec default, explicit "none".
-        constexpr int COLUMN = 1; // Staggered column-only FEC, ST 2022-1 Level A.
-        constexpr int COLUMN_BLOCK = 2; // The -b suffix has the same alignment meaning as dektec.
-        constexpr int COLUMN_ROW = 3; // Staggered columns plus consecutive rows, Level B.
-        constexpr int COLUMN_ROW_BLOCK = 4; // Block-aligned columns plus consecutive rows.
+        constexpr int32_t DISABLED = 0; // Match the established dektec default, explicit "none".
+        constexpr int32_t COLUMN = 1; // Staggered column-only FEC, ST 2022-1 Level A.
+        constexpr int32_t COLUMN_BLOCK = 2; // The -b suffix has the same alignment meaning as dektec.
+        constexpr int32_t COLUMN_ROW = 3; // Staggered columns plus consecutive rows, Level B.
+        constexpr int32_t COLUMN_ROW_BLOCK = 4; // Block-aligned columns plus consecutive rows.
     }
 }
 
@@ -32,6 +32,9 @@ ts::RTPFECOutput::RTPFECOutput(Report& report) :
     _report(report)
 {
 }
+
+// The owning library provides one vtable definition to shared-library callers.
+ts::RTPFECOutput::~RTPFECOutput() = default;
 
 void ts::RTPFECOutput::defineArgs(Args& args) const
 {
@@ -47,7 +50,8 @@ void ts::RTPFECOutput::defineArgs(Args& args) const
               u"With --rtp, generate SMPTE ST 2022-1 column FEC (1d) or column and row FEC (2d). "
               u"The suffix -b selects block alignment; otherwise columns are staggered. The default is none. "
               u"FEC uses the media destination port +2 and +4, with the same source port. "
-              u"Requires an even media port, payload type 33 and at most seven TS packets per datagram.");
+              u"Requires an even media port, payload type 33 and at most seven TS packets per datagram. "
+              u"Use --enforce-burst for a constant media packet count.");
     args.option(u"smpte-2022-l", 0, Args::INTEGER, 0, 1, 1, RTPFECEncoder::MAX_COLUMNS); // Reuse dektec's L: columns.
     args.help(u"smpte-2022-l", u"count",
               u"Number of FEC columns L, from 1 to 20 (at least 4 with 2D FEC). The default is 4. "
@@ -65,7 +69,7 @@ void ts::RTPFECOutput::defineArgs(Args& args) const
 bool ts::RTPFECOutput::loadArgs(Args& args, const IPSocketAddress& destination, bool rtp, uint8_t payload_type, size_t burst)
 {
     // Named modes select the wire dimension and alignment, independently of vendor pacing labels.
-    const int mode = args.intValue<int>(u"smpte-2022-fec", DISABLED);
+    const int32_t mode = args.intValue<int32_t>(u"smpte-2022-fec", DISABLED);
     if (mode < DISABLED || mode > COLUMN_ROW_BLOCK) {
         args.error(u"invalid SMPTE-2022 FEC mode"); // Reject numeric enumeration values outside our supported modes too.
         return false;

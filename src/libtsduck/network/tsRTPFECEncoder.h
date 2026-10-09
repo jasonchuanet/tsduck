@@ -51,7 +51,7 @@ namespace ts {
             //! @param [in,out] other Parity whose storage is transferred.
             Datagram(Datagram&& other) noexcept = default;
             //! Destructor.
-            virtual ~Datagram() = default;
+            virtual ~Datagram();
             //! Copy assignment.
             //! @param [in] other Parity to copy.
             //! @return A reference to this object.
@@ -82,7 +82,7 @@ namespace ts {
         //! Default constructor; call reset() before adding media.
         RTPFECEncoder() = default;
         //! Destructor; owned containers release all pending parity.
-        virtual ~RTPFECEncoder() = default;
+        virtual ~RTPFECEncoder();
         //! Validate and configure a new session, discarding old parity.
         //! @param [in] columns L, in 1..20 (4..20 with rows enabled).
         //! @param [in] rows D, in 4..20; L * D must not exceed 100.
@@ -92,8 +92,9 @@ namespace ts {
         bool reset(size_t columns = DEFAULT_COLUMNS, size_t rows = DEFAULT_ROWS, bool two_dimensional = true, bool block_aligned = true);
         //! Discard configuration and pending parity. reset() is required before reuse.
         void clear();
-        //! Consume one consecutive ST 2022-2 RTP media packet without modifying it.
+        //! Consume one consecutive MPEG-TS RTP media packet without modifying it.
         //! Fixed RTP header, PT 33 and 1..7 TS188/RS204 packets are required.
+        //! Variable payload lengths are supported, including short final bursts.
         //! Sequence numbers must be consecutive modulo 65536 and SSRC must stay fixed.
         //! @param [in] address Complete media wire data; null is rejected.
         //! @param [in] size Size of @a address in bytes, validated before access.
@@ -102,7 +103,7 @@ namespace ts {
         bool addMedia(const void* address, size_t size, Datagrams& output);
 
     private:
-        using Media = std::span<const uint8_t>; //!< Borrowed wire bytes, valid only during ingestion.
+        using _Media = std::span<const uint8_t>; //!< Borrowed wire bytes, valid only during ingestion.
         size_t _columns_count = 0; //!< L; zero means unconfigured.
         size_t _rows_count = 0;    //!< D, independent of the row-stream enable flag.
         bool _two_dimensional = false; //!< Row parity is optional; column parity is always generated.
@@ -121,12 +122,12 @@ namespace ts {
         //! Validate the media profile and the current session without changing state.
         //! @param [in] media Borrowed wire packet with its size already bounded.
         //! @return True for supported, consecutive media in the configured session.
-        bool _validMedia(const Media& media) const;
+        bool _validMedia(const _Media& media) const;
         //! XOR known media into a wire-format equation, zero-extending shorter payloads.
         //! @param [in,out] parity Equation, initialized when empty.
         //! @param [in] media Validated media.
         //! @param [in] row True for a consecutive row, false for an interleaved column.
-        void _accumulate(ByteBlock& parity, const Media& media, bool row) const;
+        void _accumulate(ByteBlock& parity, const _Media& media, bool row) const;
         //! Move one completed equation into the caller's output, assigning its RTP sequence.
         //! @param [in,out] parity Completed equation, emptied by the move.
         //! @param [in] row Parity stream whose sequence is advanced.
@@ -135,6 +136,6 @@ namespace ts {
         //! Accumulate one media packet into staggered columns, emitting complete equations after L intervals.
         //! @param [in] media Validated media at the current matrix position.
         //! @param [out] output Destination for a column whose required delay has elapsed.
-        void _staggeredColumn(const Media& media, Datagrams& output);
+        void _staggeredColumn(const _Media& media, Datagrams& output);
     };
 }

@@ -58,7 +58,7 @@ namespace ts {
             //! @param [in,out] other Datagram whose storage is transferred.
             Datagram(Datagram&& other) noexcept = default;
             //! Destructor.
-            virtual ~Datagram() = default;
+            virtual ~Datagram();
             //! Copy assignment.
             //! @param [in] other Datagram to copy.
             //! @return A reference to this object.
@@ -135,7 +135,7 @@ namespace ts {
         RTPFECDecoder() = default;
 
         //! Destructor; owned containers release media, parity and reverse references.
-        virtual ~RTPFECDecoder() = default;
+        virtual ~RTPFECDecoder();
 
         //!
         //! Discard all buffered data and reset statistics.
@@ -147,9 +147,10 @@ namespace ts {
 
         //!
         //! Insert a media datagram. Duplicates are discarded.
-        //! Only the ST 2022-2 profile is accepted: fixed 12-byte RTP header,
+        //! Media use the ST 2022-2 forms: fixed 12-byte RTP header,
         //! payload type 33, no padding, extension, CSRC, or marker, and up to
-        //! seven 188-byte or 204-byte TS packets. A new SSRC resets the session.
+        //! seven 188-byte or 204-byte TS packets. Variable packet counts and
+        //! TS packet lengths are tolerated on reception. A new SSRC resets the session.
         //! @param [in,out] datagram Datagram whose data may be moved into the decoder.
         //! @return True for supported media, false for malformed, stale or unrepresentable receive times.
         //!
@@ -175,6 +176,7 @@ namespace ts {
 
         //!
         //! Time until the next playout deadline, rounded up to milliseconds.
+        //! Longer delays are capped to the clock's maximum whole-millisecond interval.
         //! @param [in] now Current monotonic time.
         //! @return Delay, or milliseconds::max() if no media is buffered.
         //!
@@ -217,31 +219,31 @@ namespace ts {
 
     private:
         //! Identify parity by extended base sequence, stride, count and direction.
-        using FECKey = std::tuple<int64_t, uint8_t, uint8_t, bool>;
+        using _FECKey = std::tuple<int64_t, uint8_t, uint8_t, bool>;
 
-        //! Partially reduced parity, exported for cleanup through public inline destruction.
-        class TSDUCKDLL FEC
+        //! Partially reduced parity, exported for exception cleanup through public inline construction.
+        class TSDUCKDLL _FEC
         {
             friend class RTPFECDecoder;
         public:
             //! Default constructor.
-            FEC() = default;
+            _FEC() = default;
             //! Copy constructor.
             //! @param [in] other Equation to copy.
-            FEC(const FEC& other) = default;
+            _FEC(const _FEC& other) = default;
             //! Move constructor.
             //! @param [in,out] other Equation whose storage is transferred.
-            FEC(FEC&& other) noexcept = default;
+            _FEC(_FEC&& other) noexcept = default;
             //! Destructor.
-            virtual ~FEC() = default;
+            virtual ~_FEC();
             //! Copy assignment.
             //! @param [in] other Equation to copy.
             //! @return A reference to this object.
-            FEC& operator=(const FEC& other) = default;
+            _FEC& operator=(const _FEC& other) = default;
             //! Move assignment.
             //! @param [in,out] other Equation whose storage is transferred.
             //! @return A reference to this object.
-            FEC& operator=(FEC&& other) noexcept = default;
+            _FEC& operator=(_FEC&& other) noexcept = default;
         private:
             uint16_t _length = 0;                    //!< XOR length excludes the fixed media RTP header.
             uint8_t _payload_type = 0;               //!< E is removed before reducing the recovery PT.
@@ -261,8 +263,8 @@ namespace ts {
         uint64_t _recovered = 0; //!< Successfully reconstructed media datagrams.
         uint64_t _lost = 0; //!< Missing media finalized by playout.
         std::map<int64_t, Datagram> _media {};                //!< Bounded media history and playout buffer.
-        std::map<FECKey, FEC> _fec {};                      //!< Incomplete parity groups.
-        std::map<int64_t, std::set<FECKey>> _waiting {};      //!< Missing media -> affected parity groups.
+        std::map<_FECKey, _FEC> _fec {};                      //!< Incomplete parity groups.
+        std::map<int64_t, std::set<_FECKey>> _waiting {};      //!< Missing media -> affected parity groups.
         size_t _missing_references = 0;                      //!< Bound the reverse index as well as the payloads.
         std::deque<std::pair<Datagram, bool>> _early_fec {};   //!< Parity received before the first media.
 
@@ -279,10 +281,10 @@ namespace ts {
         //! Reduce parity with one known media packet.
         //! @param [in,out] fec Equation reduced by the known media.
         //! @param [in] media Validated media, including its fixed RTP header.
-        void _reduce(FEC& fec, const Datagram& media) const;
+        void _reduce(_FEC& fec, const Datagram& media) const;
 
         //! Pending reconstructed media, processed iteratively without recursion.
-        using ReadyMedia = std::deque<std::pair<int64_t, Datagram>>;
+        using _ReadyMedia = std::deque<std::pair<int64_t, Datagram>>;
         //! Insert media and cascade newly solvable parity groups.
         //! @param [in] sequence Extended media sequence.
         //! @param [in,out] datagram Validated media whose storage is transferred.
@@ -290,7 +292,7 @@ namespace ts {
         //! Reconstruct a singleton equation without recursively inserting media.
         //! @param [in] key Equation to inspect.
         //! @param [out] ready Queue receiving successfully reconstructed media.
-        void _recover(const FECKey& key, ReadyMedia& ready);
+        void _recover(const _FECKey& key, _ReadyMedia& ready);
         //! Anchor and retain a validated parity datagram.
         //! @param [in] datagram Parity with validated RTP and FEC headers.
         //! @param [in] row True for row parity, false for column parity.
@@ -302,11 +304,11 @@ namespace ts {
         //! @param [in] offset Media sequence stride.
         //! @param [in] count Number of protected media datagrams.
         //! @return True if every known media length fits and no missing member is finalized.
-        bool _reduceEquation(FEC& fec, int64_t base, uint8_t offset, uint8_t count);
+        bool _reduceEquation(_FEC& fec, int64_t base, uint8_t offset, uint8_t count);
 
         //! Remove parity and all its reverse references.
         //! @param [in] key Equation to remove; an absent key is harmless.
-        void _dropFEC(const FECKey& key);
+        void _dropFEC(const _FECKey& key);
         //! Remove media and parity history outside the configured sequence window.
         void _prune();
     };

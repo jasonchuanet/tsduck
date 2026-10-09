@@ -44,8 +44,12 @@ All streams use the same destination IP address, UDP source port, local interfac
 Choose a destination port with room for the enabled parity streams.
 
 The ST 2022-2 media profile requires payload type 33 and at most seven 188-byte or 204-byte TS packets per RTP datagram.
-RTP sequence, SSRC and timestamp options remain available. `--enforce-burst` makes the media payload size consistent;
-a final short burst is still transmitted and can participate in FEC without padding.
+RTP sequence, SSRC and timestamp options remain available.
+ST 2022-2 also requires the TS packet length and the number of TS packets per media datagram to remain constant for a session.
+Use `--enforce-burst` to keep the packet count constant during streaming, and a file length which is a multiple of the burst size
+when strict constant-count conformance is required through the end of a finite stream.
+As a compatibility extension, a final short burst is still transmitted and can participate in FEC without padding.
+The receiver tolerates variable packet counts and TS packet lengths; this does not make a variable-count sender conformant to ST 2022-2.
 
 `--smpte-2022-l` sets L, the number of columns, and `--smpte-2022-d` sets D, the number of rows.
 The default is 4 by 4. Supported values are 1 <= L <= 20, 4 <= D <= 20, and L * D <= 100.

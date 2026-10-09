@@ -19,9 +19,9 @@ namespace ts {
         for (size_t columns = 1; columns <= 20; ++columns) {
             for (size_t rows = 4; rows <= 20 && columns * rows <= 100; ++rows) {
                 for (const bool& block : {false, true}) {
-                    _exercise(columns, rows, false, PKT_SIZE, 1, block); // Also cover non-coprime staggered geometries.
+                    _Exercise(columns, rows, false, PKT_SIZE, 1, block); // Also cover non-coprime staggered geometries.
                     if (columns >= 4) {
-                        _exercise(columns, rows, true, PKT_SIZE, 1, block); // Row stream is forbidden for narrower matrices.
+                        _Exercise(columns, rows, true, PKT_SIZE, 1, block); // Row stream is forbidden for narrower matrices.
                     }
                 }
             }
@@ -34,26 +34,26 @@ namespace ts {
         // Check all mandatory TS counts with both packet formats.
         for (const size_t& size : {PKT_SIZE, PKT_RS_SIZE}) {
             for (const size_t& count : std::initializer_list<size_t> {1, 4, 7}) {
-                _exercise(4, 4, true, size, count, false); // Staggered groups cross matrix and sequence boundaries.
-                _exercise(4, 4, true, size, count, true); // Block-aligned groups use the same payload operating points.
+                _Exercise(4, 4, true, size, count, false); // Staggered groups cross matrix and sequence boundaries.
+                _Exercise(4, 4, true, size, count, true); // Block-aligned groups use the same payload operating points.
             }
         }
-        Encoder encoder;
+        _Encoder encoder;
         TSUNIT_ASSERT(encoder.reset());
-        Media media; // Originals remain available after encoder calls for independent comparison.
-        Encoder::Datagrams output;
+        _Media media; // Originals remain available after encoder calls for independent comparison.
+        _Encoder::Datagrams output;
         for (size_t index = 0; index < 32; ++index) {
-            media.push_back(_packet(static_cast<uint16_t>(_base + index), PKT_SIZE, 1 + index % 7));
+            media.push_back(_Packet(static_cast<uint16_t>(_BASE + index), PKT_SIZE, 1 + index % 7));
             TSUNIT_ASSERT(encoder.addMedia(media.back().data(), media.back().size(), output));
             for (const auto& parity : output) {
-                _check(parity, media, 4, 4, index); // Variable lengths require zero-extension and independent XOR length recovery.
+                _Check(parity, media, 4, 4, index); // Variable lengths require zero-extension and independent XOR length recovery.
             }
         }
     }
 
     TSUNIT_DEFINE_TEST(InvalidConfiguration)
     {
-        Encoder encoder;
+        _Encoder encoder;
         TSUNIT_ASSERT(!encoder.reset(0, 4)); // Avoid modulo-zero and invalid storage geometry.
         TSUNIT_ASSERT(!encoder.reset(21, 4)); // Each coordinate has an independent maximum.
         TSUNIT_ASSERT(!encoder.reset(4, 3)); // Too shallow for the mandatory transport profile.
@@ -62,19 +62,19 @@ namespace ts {
         TSUNIT_ASSERT(!encoder.reset(3, 4, true)); // Row protection requires at least four columns.
         TSUNIT_ASSERT(!encoder.reset(std::numeric_limits<size_t>::max(), 4)); // Reject before multiplication can overflow.
         TSUNIT_ASSERT(encoder.reset(1, 4, false)); // Narrow matrices are valid for column-only mode.
-        Encoder::Datagrams output;
-        auto first = _packet(_base); // Begin a real session before trying an invalid replacement.
+        _Encoder::Datagrams output;
+        auto first = _Packet(_BASE); // Begin a real session before trying an invalid replacement.
         TSUNIT_ASSERT(encoder.addMedia(first.data(), first.size(), output));
         TSUNIT_ASSERT(!encoder.reset(0, 0)); // Failed reconfiguration must retain the prior valid session.
-        auto second = _packet(_base + 1); // The original geometry and expected sequence must survive.
+        auto second = _Packet(_BASE + 1); // The original geometry and expected sequence must survive.
         TSUNIT_ASSERT(encoder.addMedia(second.data(), second.size(), output));
     }
 
     TSUNIT_DEFINE_TEST(InvalidMedia)
     {
-        Encoder encoder;
-        Encoder::Datagrams output;
-        const auto good = _packet(_base);
+        _Encoder encoder;
+        _Encoder::Datagrams output;
+        const auto good = _Packet(_BASE);
         TSUNIT_ASSERT(!encoder.addMedia(good.data(), good.size(), output)); // Unconfigured use is explicit, not modulo-zero.
         TSUNIT_ASSERT(encoder.reset());
         TSUNIT_ASSERT(!encoder.addMedia(nullptr, good.size(), output)); // No null buffer access is permitted.
@@ -89,9 +89,9 @@ namespace ts {
         }
         TSUNIT_ASSERT(encoder.addMedia(good.data(), good.size(), output));
         TSUNIT_ASSERT(!encoder.addMedia(good.data(), good.size(), output)); // Duplicate media would make an invalid XOR equation.
-        auto next = _packet(_base + 1);
+        auto next = _Packet(_BASE + 1);
         auto bad = next; // Keep the next valid packet available for a rejection-state check.
-        PutUInt32(bad.data() + 8, _ssrc + 1); // SSRC changes require an explicit new session.
+        PutUInt32(bad.data() + 8, _SSRC + 1); // SSRC changes require an explicit new session.
         TSUNIT_ASSERT(!encoder.addMedia(bad.data(), bad.size(), output));
         TSUNIT_ASSERT(encoder.addMedia(next.data(), next.size(), output)); // Rejection has not consumed the expected sequence.
         TSUNIT_ASSERT(output.empty()); // Failed packets must not prematurely complete the row.
@@ -99,13 +99,13 @@ namespace ts {
 
     TSUNIT_DEFINE_TEST(RestartAndStop)
     {
-        Encoder encoder;
+        _Encoder encoder;
         TSUNIT_ASSERT(encoder.reset());
-        Encoder::Datagrams output;
+        _Encoder::Datagrams output;
         // Stop one member before a complete 4x4 matrix: no shortened column is valid.
         // Complete rows have already been emitted and must not be emitted twice.
         for (size_t index = 0; index < 15; ++index) {
-            auto packet = _packet(static_cast<uint16_t>(_base + index));
+            auto packet = _Packet(static_cast<uint16_t>(_BASE + index));
             TSUNIT_ASSERT(encoder.addMedia(packet.data(), packet.size(), output));
             for (const auto& parity : output) {
                 TSUNIT_ASSERT(parity.isRow()); // No columns may be sent before their complete matrix and delay.
@@ -113,10 +113,10 @@ namespace ts {
         }
         encoder.clear(); // A partial matrix cannot change its declared NA at shutdown.
         encoder.clear(); // Resource cleanup is repeatable, without repeating object destruction.
-        auto packet = _packet(_base); // Old media is invalid after explicit teardown until reset.
+        auto packet = _Packet(_BASE); // Old media is invalid after explicit teardown until reset.
         TSUNIT_ASSERT(!encoder.addMedia(packet.data(), packet.size(), output));
         TSUNIT_ASSERT(output.empty()); // No pending row or old column escapes through a rejected call.
-        _exercise(4, 4, true); // Fresh encoders remain independent of the discarded session.
+        _Exercise(4, 4, true); // Fresh encoders remain independent of the discarded session.
         TSUNIT_ASSERT(encoder.reset(4, 4, false));
         TSUNIT_ASSERT(encoder.addMedia(packet.data(), packet.size(), output));
         TSUNIT_ASSERT(output.empty()); // Restart begins with empty parity and independent counters.
@@ -128,18 +128,18 @@ namespace ts {
         // Leading losses have enough later media for complete, properly delayed columns.
         for (const auto& mode : {std::pair {false, false}, {false, true}, {true, false}, {true, true}}) {
             const auto& [two_dimensional, block] = mode; // Independently exercise dimension and alignment.
-            Encoder encoder;
-            Decoder decoder;
+            _Encoder encoder;
+            _Decoder decoder;
             TSUNIT_ASSERT(encoder.reset(4, 4, two_dimensional, block));
-            Media media;
-            Encoder::Datagrams parity;
+            _Media media;
+            _Encoder::Datagrams parity;
             const std::set<size_t> losses = two_dimensional ? std::set<size_t> {0, 1, 5} :
                 (block ? std::set<size_t> {0, 1, 2, 3} : std::set<size_t> {16, 17, 18, 19}); // Staggered startup has incomplete columns.
             for (size_t index = 0; index < 48; ++index) {
-                media.push_back(_packet(static_cast<uint16_t>(_base + index)));
+                media.push_back(_Packet(static_cast<uint16_t>(_BASE + index)));
                 TSUNIT_ASSERT(encoder.addMedia(media.back().data(), media.back().size(), parity));
-                Decoder::Datagram packet;
-                packet.setArrival(Decoder::TimePoint(cn::seconds(1)));
+                _Decoder::Datagram packet;
+                packet.setArrival(_Decoder::TimePoint(cn::seconds(1)));
                 packet.data() = media.back(); // Keep expected originals independent of decoder moves.
                 if (!losses.contains(index)) {
                     TSUNIT_ASSERT(decoder.addMedia(packet));
@@ -150,8 +150,8 @@ namespace ts {
                 }
             }
             size_t index = 0; // Playout must include leading recoveries in original sequence order.
-            Decoder::Datagram packet;
-            while (decoder.getDatagram(packet, Decoder::TimePoint(cn::seconds(3)))) {
+            _Decoder::Datagram packet;
+            while (decoder.getDatagram(packet, _Decoder::TimePoint(cn::seconds(3)))) {
                 TSUNIT_ASSERT(index < media.size());
                 TSUNIT_ASSERT(packet.data() == media[index]); // Recover every original byte, not just a matching packet count.
                 ++index;
@@ -166,15 +166,15 @@ namespace ts {
     {
         // Each arrangement must remain bounded and correctly numbered across independent wraps.
         for (const bool& block : {false, true}) {
-            Encoder encoder;
+            _Encoder encoder;
             TSUNIT_ASSERT(encoder.reset(4, 4, true, block));
-            Encoder::Datagrams output;
+            _Encoder::Datagrams output;
             size_t row_sequence = 0; // Wide oracles retain cycle counts beyond the 16-bit wire field.
             size_t column_sequence = 0; // Column numbering has a different initial emission delay.
             // Do not retain the stream in this test: constant storage must suffice across many wraps.
             // Enough media is sent for both parity counters to cross 65536 independently.
             for (size_t index = 0; index < 4 * 65540; ++index) {
-                auto packet = _packet(static_cast<uint16_t>(_base + index));
+                auto packet = _Packet(static_cast<uint16_t>(_BASE + index));
                 TSUNIT_ASSERT(encoder.addMedia(packet.data(), packet.size(), output));
                 TSUNIT_ASSERT(output.size() <= 2); // A long-running stream never accumulates a burst of pending parity.
                 for (const auto& parity : output) {
@@ -191,16 +191,16 @@ namespace ts {
     {
         // The normative wire permits Annex B's example, not vendor-specific M1/M2 time slots.
         // Check its exact 4x5 bases and delays independently of the general geometry oracle.
-        Encoder encoder;
+        _Encoder encoder;
         TSUNIT_ASSERT(encoder.reset(4, 5, false, false));
-        Encoder::Datagrams output;
+        _Encoder::Datagrams output;
         size_t expected_base = 0;
         for (size_t index = 0; index < 60; ++index) {
-            const auto media = _packet(static_cast<uint16_t>(_base + index));
+            const auto media = _Packet(static_cast<uint16_t>(_BASE + index));
             TSUNIT_ASSERT(encoder.addMedia(media.data(), media.size(), output));
             for (const auto& parity : output) {
                 TSUNIT_ASSERT(!parity.isRow()); // Level A must never generate the optional row stream.
-                TSUNIT_EQUAL(static_cast<uint16_t>(_base + expected_base), GetUInt16(parity.data().data() + 12));
+                TSUNIT_EQUAL(static_cast<uint16_t>(_BASE + expected_base), GetUInt16(parity.data().data() + 12));
                 TSUNIT_EQUAL(expected_base + 20, index); // Last member is base+16, followed by exactly four media intervals.
                 expected_base += 5; // Annex B explicitly shows F0, F5, F10, F15, F20, ...
             }

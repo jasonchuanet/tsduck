@@ -56,6 +56,7 @@ namespace ts {
     private:
         Report& _report; //!< Error sink; outlives this configuration object.
         size_t _streams = 0; //!< Disabled, columns only, or columns and rows.
+        bool _block_aligned = false; //!< Named modes ending in -b use aligned Annex C columns.
         size_t _columns = RTPFECEncoder::DEFAULT_COLUMNS; //!< Matrix width L.
         size_t _rows = RTPFECEncoder::DEFAULT_ROWS; //!< Matrix depth D.
         IPSocketAddress _column_destination {}; //!< Same media destination IP, UDP port N+2.

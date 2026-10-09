@@ -16,10 +16,10 @@
 
 namespace ts {
     //!
-    //! Generate aligned column and optional row FEC, using ST 2022-1 Annex C shaping.
+    //! Generate column and optional row FEC, using ST 2022-1 Annex B or C shaping.
     //! @ingroup libtsduck net
     //! All calls belong to one thread. Media are never buffered or modified.
-    //! Rows are emitted immediately; columns are distributed over the next matrix.
+    //! Rows are emitted immediately; columns honor the required transmission delay.
     //! Only complete groups are protected. clear() discards pending parity at shutdown,
     //! without manufacturing media or sending columns before their required delay.
     //!
@@ -87,8 +87,9 @@ namespace ts {
         //! @param [in] columns L, in 1..20 (4..20 with rows enabled).
         //! @param [in] rows D, in 4..20; L * D must not exceed 100.
         //! @param [in] two_dimensional Enable row parity in addition to columns.
+        //! @param [in] block_aligned Align column starts in a block (Annex C), otherwise stagger them (Annex B).
         //! @return True on success; invalid configuration leaves the session unchanged.
-        bool reset(size_t columns = DEFAULT_COLUMNS, size_t rows = DEFAULT_ROWS, bool two_dimensional = true);
+        bool reset(size_t columns = DEFAULT_COLUMNS, size_t rows = DEFAULT_ROWS, bool two_dimensional = true, bool block_aligned = true);
         //! Discard configuration and pending parity. reset() is required before reuse.
         void clear();
         //! Consume one consecutive ST 2022-2 RTP media packet without modifying it.
@@ -105,6 +106,7 @@ namespace ts {
         size_t _columns_count = 0; //!< L; zero means unconfigured.
         size_t _rows_count = 0;    //!< D, independent of the row-stream enable flag.
         bool _two_dimensional = false; //!< Row parity is optional; column parity is always generated.
+        bool _block_aligned = true; //!< Column starts share a row only with Annex C shaping.
         bool _initialized = false; //!< Media sequence and SSRC are anchored.
         uint16_t _expected_sequence = 0; //!< Next required media wire sequence, modulo 65536.
         uint32_t _ssrc = 0; //!< Media session identifier; parity SSRC is always zero.
@@ -130,5 +132,9 @@ namespace ts {
         //! @param [in] row Parity stream whose sequence is advanced.
         //! @param [out] output Destination for the emitted parity.
         void _emit(ByteBlock& parity, bool row, Datagrams& output);
+        //! Accumulate one media packet into staggered columns, emitting complete equations after L intervals.
+        //! @param [in] media Validated media at the current matrix position.
+        //! @param [out] output Destination for a column whose required delay has elapsed.
+        void _staggeredColumn(const Media& media, Datagrams& output);
     };
 }

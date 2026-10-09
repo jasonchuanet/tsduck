@@ -18,9 +18,11 @@ namespace ts {
         // Include every asymmetric case so swapping L and D cannot pass the test.
         for (size_t columns = 1; columns <= 20; ++columns) {
             for (size_t rows = 4; rows <= 20 && columns * rows <= 100; ++rows) {
-                _exercise(columns, rows, false); // Every mandatory 1D geometry, including L=1.
-                if (columns >= 4) {
-                    _exercise(columns, rows, true); // Row stream is forbidden for narrower matrices.
+                for (const bool& block : {false, true}) {
+                    _exercise(columns, rows, false, PKT_SIZE, 1, block); // Also cover non-coprime staggered geometries.
+                    if (columns >= 4) {
+                        _exercise(columns, rows, true, PKT_SIZE, 1, block); // Row stream is forbidden for narrower matrices.
+                    }
                 }
             }
         }
@@ -32,7 +34,8 @@ namespace ts {
         // Check all mandatory TS counts with both packet formats.
         for (const size_t& size : {PKT_SIZE, PKT_RS_SIZE}) {
             for (const size_t& count : std::initializer_list<size_t> {1, 4, 7}) {
-                _exercise(4, 4, true, size, count); // Mandatory packet sizes and operating points.
+                _exercise(4, 4, true, size, count, false); // Staggered groups cross matrix and sequence boundaries.
+                _exercise(4, 4, true, size, count, true); // Block-aligned groups use the same payload operating points.
             }
         }
         Encoder encoder;
@@ -123,13 +126,15 @@ namespace ts {
     {
         // This is additional integration coverage; independent XOR checks remain the primary oracle.
         // Leading losses have enough later media for complete, properly delayed columns.
-        for (const bool& two_dimensional : {false, true}) {
+        for (const auto& mode : {std::pair {false, false}, {false, true}, {true, false}, {true, true}}) {
+            const auto& [two_dimensional, block] = mode; // Independently exercise dimension and alignment.
             Encoder encoder;
             Decoder decoder;
-            TSUNIT_ASSERT(encoder.reset(4, 4, two_dimensional));
+            TSUNIT_ASSERT(encoder.reset(4, 4, two_dimensional, block));
             Media media;
             Encoder::Datagrams parity;
-            const std::set<size_t> losses = two_dimensional ? std::set<size_t> {0, 1, 5} : std::set<size_t> {0, 1, 2, 3};
+            const std::set<size_t> losses = two_dimensional ? std::set<size_t> {0, 1, 5} :
+                (block ? std::set<size_t> {0, 1, 2, 3} : std::set<size_t> {16, 17, 18, 19}); // Staggered startup has incomplete columns.
             for (size_t index = 0; index < 48; ++index) {
                 media.push_back(_packet(static_cast<uint16_t>(_base + index)));
                 TSUNIT_ASSERT(encoder.addMedia(media.back().data(), media.back().size(), parity));
@@ -159,23 +164,47 @@ namespace ts {
 
     TSUNIT_DEFINE_TEST(LongRun)
     {
+        // Each arrangement must remain bounded and correctly numbered across independent wraps.
+        for (const bool& block : {false, true}) {
+            Encoder encoder;
+            TSUNIT_ASSERT(encoder.reset(4, 4, true, block));
+            Encoder::Datagrams output;
+            size_t row_sequence = 0; // Wide oracles retain cycle counts beyond the 16-bit wire field.
+            size_t column_sequence = 0; // Column numbering has a different initial emission delay.
+            // Do not retain the stream in this test: constant storage must suffice across many wraps.
+            // Enough media is sent for both parity counters to cross 65536 independently.
+            for (size_t index = 0; index < 4 * 65540; ++index) {
+                auto packet = _packet(static_cast<uint16_t>(_base + index));
+                TSUNIT_ASSERT(encoder.addMedia(packet.data(), packet.size(), output));
+                TSUNIT_ASSERT(output.size() <= 2); // A long-running stream never accumulates a burst of pending parity.
+                for (const auto& parity : output) {
+                    auto& sequence = parity.isRow() ? row_sequence : column_sequence;
+                    TSUNIT_EQUAL(static_cast<uint16_t>(sequence), GetUInt16(parity.data().data() + 2));
+                    ++sequence;
+                }
+            }
+            TSUNIT_ASSERT(row_sequence > 65536 && column_sequence >= 65536); // Both parity streams crossed their independent wrap boundary.
+        }
+    }
+
+    TSUNIT_DEFINE_TEST(NonBlockArrangement)
+    {
+        // The normative wire permits Annex B's example, not vendor-specific M1/M2 time slots.
+        // Check its exact 4x5 bases and delays independently of the general geometry oracle.
         Encoder encoder;
-        TSUNIT_ASSERT(encoder.reset());
+        TSUNIT_ASSERT(encoder.reset(4, 5, false, false));
         Encoder::Datagrams output;
-        size_t row_sequence = 0; // Wide oracles retain cycle counts beyond the 16-bit wire field.
-        size_t column_sequence = 0; // Column numbering has a different initial emission delay.
-        // Do not retain the stream in this test: constant storage must suffice across many wraps.
-        // Enough media is sent for both parity counters to cross 65536 independently.
-        for (size_t index = 0; index < 4 * 65540; ++index) {
-            auto packet = _packet(static_cast<uint16_t>(_base + index));
-            TSUNIT_ASSERT(encoder.addMedia(packet.data(), packet.size(), output));
-            TSUNIT_ASSERT(output.size() <= 2); // A long-running stream never accumulates a burst of pending parity.
+        size_t expected_base = 0;
+        for (size_t index = 0; index < 60; ++index) {
+            const auto media = _packet(static_cast<uint16_t>(_base + index));
+            TSUNIT_ASSERT(encoder.addMedia(media.data(), media.size(), output));
             for (const auto& parity : output) {
-                auto& sequence = parity.isRow() ? row_sequence : column_sequence;
-                TSUNIT_EQUAL(static_cast<uint16_t>(sequence), GetUInt16(parity.data().data() + 2));
-                ++sequence;
+                TSUNIT_ASSERT(!parity.isRow()); // Level A must never generate the optional row stream.
+                TSUNIT_EQUAL(static_cast<uint16_t>(_base + expected_base), GetUInt16(parity.data().data() + 12));
+                TSUNIT_EQUAL(expected_base + 20, index); // Last member is base+16, followed by exactly four media intervals.
+                expected_base += 5; // Annex B explicitly shows F0, F5, F10, F15, F20, ...
             }
         }
-        TSUNIT_ASSERT(row_sequence > 65536 && column_sequence >= 65536); // Both parity streams crossed their independent wrap boundary.
+        TSUNIT_EQUAL(40, expected_base); // Eight complete, correctly delayed columns; the last groups remain pending.
     }
 }

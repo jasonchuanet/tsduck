@@ -49,7 +49,7 @@ namespace ts {
         UDPReceiver     _sock {this}; //!< Media UDP receiver.
 
         // FEC is optional. With FEC disabled, the original single-socket path is used.
-        size_t _fec_streams = 0;                 //!< Disabled, columns only, or columns and rows.
+        size_t _fec_streams = 0;                 //!< Zero when disabled, two when enabled; row traffic may be absent.
         size_t _fec_buffer_size = RTPFECDecoder::DEFAULT_BUFFER_SIZE; //!< A datagram window, not the socket's byte buffer.
         cn::milliseconds _fec_latency {RTPFECDecoder::DEFAULT_LATENCY}; //!< Covers parity transmission and network jitter.
         UDPReceiver _column_sock {this}; //!< Column parity receiver on media port plus two.

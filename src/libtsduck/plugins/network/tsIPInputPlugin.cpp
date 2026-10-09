@@ -36,22 +36,22 @@ ts::IPInputPlugin::IPInputPlugin(TSP* tsp_) :
     // multicast, source filtering and SSM behavior of direct UDP reception.
     _sock_args.defineArgs(*this, true, true);
 
-    option(u"fec", 0, INTEGER, 0, 1, 1, 2, true);
-    help(u"fec", u"1|2",
+    option(u"smpte-2022-fec"); // Match dektec input: a receiver discovers geometry from the parity headers.
+    help(u"smpte-2022-fec",
          u"Enable SMPTE ST 2022-1 FEC recovery for ST 2022-2 MPEG-TS over RTP. "
-         u"Use 1 for column FEC (media port +2), or 2 for column and row FEC "
-         u"(media ports +2 and +4). The default with no value is 2. "
+         u"Receive column FEC on media port +2 and optional row FEC on media port +4. "
+         u"Both 1D/2D and block/non-block arrangements are detected from the headers. "
          u"All streams use the same destination address and local interface. "
          u"FEC is disabled by default.");
 
-    option<cn::milliseconds>(u"fec-latency", 0, 0, 1, 1, 60000);
-    help(u"fec-latency",
+    option<cn::milliseconds>(u"smpte-2022-fec-latency", 0, 0, 1, 1, 60000);
+    help(u"smpte-2022-fec-latency",
          u"Specify the FEC playout latency in milliseconds. The default is 1000. "
          u"Allow time for the sender's FEC matrix and network jitter. "
          u"Unrecoverable losses are skipped when this delay expires.");
 
-    option(u"fec-buffer-size", 0, INTEGER, 0, 1, RTPFECDecoder::MIN_BUFFER_SIZE, RTPFECDecoder::MAX_BUFFER_SIZE);
-    help(u"fec-buffer-size", u"datagrams",
+    option(u"smpte-2022-fec-buffer-size", 0, INTEGER, 0, 1, RTPFECDecoder::MIN_BUFFER_SIZE, RTPFECDecoder::MAX_BUFFER_SIZE);
+    help(u"smpte-2022-fec-buffer-size", u"datagrams",
          u"Bound the FEC media sequence window, parity buffer and receive queue. "
          u"The default is 4096 RTP datagrams. Increase it for high bitrates or long latency. "
          u"When the sequence window fills, older media are released early.");
@@ -67,11 +67,11 @@ bool ts::IPInputPlugin::getOptions()
     // Get command line arguments for superclass and socket.
     const bool ok = SuperClass::getOptions() && _sock_args.loadArgs(*this, _sock.parameters().receive_timeout);
     _sock.setParameters(_sock_args);                    // Media keeps all existing UDP receiver options.
-    _fec_streams = present(u"fec") ? intValue<size_t>(u"fec", 2) : 0; // Bare --fec enables both streams.
-    getIntValue(_fec_buffer_size, u"fec-buffer-size", RTPFECDecoder::DEFAULT_BUFFER_SIZE); // A sequence window, not a byte buffer size.
-    getChronoValue(_fec_latency, u"fec-latency", RTPFECDecoder::DEFAULT_LATENCY); // Monotonic playout delay.
-    if (_fec_streams == 0 && (present(u"fec-latency") || present(u"fec-buffer-size"))) {
-        error(u"--fec-latency and --fec-buffer-size require --fec");
+    _fec_streams = present(u"smpte-2022-fec") ? 2 : 0; // Row silence is normal for a column-only sender.
+    getIntValue(_fec_buffer_size, u"smpte-2022-fec-buffer-size", RTPFECDecoder::DEFAULT_BUFFER_SIZE); // A datagram window, not bytes.
+    getChronoValue(_fec_latency, u"smpte-2022-fec-latency", RTPFECDecoder::DEFAULT_LATENCY); // Monotonic playout delay.
+    if (_fec_streams == 0 && (present(u"smpte-2022-fec-latency") || present(u"smpte-2022-fec-buffer-size"))) {
+        error(u"--smpte-2022-fec-latency and --smpte-2022-fec-buffer-size require --smpte-2022-fec");
         return false;                                  // Reject options that would otherwise be silently ignored.
     }
     if (_fec_streams > 0 && _sock_args.destination.port() > 65535 - 2 * _fec_streams) {
@@ -136,7 +136,7 @@ bool ts::IPInputPlugin::stop()
     if (_fec_streams > 0) {
         verbose(u"FEC recovered %'d RTP datagrams, lost %'d RTP datagrams", _fec.recoveredPackets(), _fec.lostPackets());
         if (_queue_overflows.load() > 0) {
-            warning(u"FEC receive queue dropped %'d datagrams; increase --fec-buffer-size", _queue_overflows.load());
+            warning(u"FEC receive queue dropped %'d datagrams; increase --smpte-2022-fec-buffer-size", _queue_overflows.load());
         }
     }
     return SuperClass::stop();         // Release the superclass's datagram state as usual.

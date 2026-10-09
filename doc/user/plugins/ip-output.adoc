@@ -33,8 +33,13 @@ include::{docdir}/opt/group-datagram-output.adoc[tags=!*;raw;rtp;rs204]
 [.usage]
 SMPTE forward error correction
 
-With `--rtp`, use `--fec=1` for SMPTE ST 2022-1 column FEC (1D) or `--fec=2` for column and row FEC (2D).
-A bare `--fec` selects 2D. Media use the specified even UDP port N; columns use N+2 and rows use N+4.
+With `--rtp`, use `--smpte-2022-fec` with a required mode value, following the `dektec` output option naming.
+FEC is disabled when the option is omitted or its value is `none`.
+The supported modes are `1d` (staggered columns), `1d-b` (block-aligned columns),
+`2d` (staggered columns and rows), and `2d-b` (block-aligned columns and rows).
+As in `dektec`, the suffix `-b` selects block alignment. Both `--smpte-2022-fec 2d-b` and `--smpte-2022-fec=2d-b` are accepted.
+
+Media use the specified even UDP port N; columns use N+2 and rows use N+4.
 All streams use the same destination IP address, UDP source port, local interface, TTL, TOS and multicast settings.
 Choose a destination port with room for the enabled parity streams.
 
@@ -42,43 +47,54 @@ The ST 2022-2 media profile requires payload type 33 and at most seven 188-byte 
 RTP sequence, SSRC and timestamp options remain available. `--enforce-burst` makes the media payload size consistent;
 a final short burst is still transmitted and can participate in FEC without padding.
 
-`--fec-columns` sets L, the number of columns, and `--fec-rows` sets D, the number of rows.
+`--smpte-2022-l` sets L, the number of columns, and `--smpte-2022-d` sets D, the number of rows.
 The default is 4 by 4. Supported values are 1 <= L <= 20, 4 <= D <= 20, and L * D <= 100.
 Two-dimensional FEC additionally requires L >= 4. Matrix members are RTP datagrams, each containing one or more TS packets.
 Column parity can correct bursts of up to L missing datagrams; row parity additionally corrects isolated losses.
 Payload bandwidth overhead is 1/D for 1D and 1/D + 1/L for 2D, excluding additional headers.
 
-Output follows the aligned-matrix traffic shaping in ST 2022-1 Annex C.
-Row parity immediately follows its last protected media packet. Completed columns are interleaved with media from the next matrix,
-between L and L * D media-packet intervals after their last protected packet. Media are not delayed or copied into a matrix buffer.
-At shutdown, partial groups and delayed columns that require future media are discarded.
+All enabled modes use the ST 2022-1 wire format. The standard specifies required transmission timing
+and gives non-block and block-aligned examples in Annexes B and C; receivers use each packet's sequence base, offset and count.
+The M1/M2 names in `dektec` select device-specific inter-packet insertion timing and are not additional SMPTE FEC codes.
+Those insertion modes are not offered by the software `ip` output.
+
+Rows immediately follow their last protected media packet in both 2D modes.
+With block alignment, completed columns are interleaved with media from the next matrix,
+between L and L * D media-packet intervals after their last protected packet.
+Without block alignment, column starts are staggered and each column is emitted exactly L media-packet intervals after its last member.
+The stagger is bounded to one matrix for all supported L/D combinations, including values with a common factor.
+Media are not delayed or copied into a matrix buffer.
+
+Non-block modes discard incomplete startup columns. At shutdown, partial groups and columns requiring future media are discarded.
 No extra TS packets are manufactured and no shortened-NA or prematurely transmitted parity is emitted;
-the final media datagrams may therefore lack column protection. Configure the receiver's FEC buffer and latency accordingly.
+startup and final media may therefore lack column protection. Configure the receiver's FEC buffer and latency accordingly.
 
 [source,shell]
 ----
-$ tsp -I file stream.ts -P regulate -O ip 239.1.2.3:5000 --rtp --fec=2 --fec-columns 10 --fec-rows 10
+$ tsp -I file stream.ts -P regulate -O ip 239.1.2.3:5000 --rtp --smpte-2022-fec 2d-b --smpte-2022-l 10 --smpte-2022-d 10
 ----
 
 [.opt]
-*--fec*[=1|2]
+*--smpte-2022-fec* _mode_
 
 [.optdoc]
-With `--rtp`, generate column FEC (1) or column and row FEC (2, the default).
-Requires the ST 2022-2 media profile and an even destination port.
+With `--rtp`, generate SMPTE FEC using `1d`, `1d-b`, `2d`, or `2d-b`.
+The default is `none`, which disables FEC. The mode value is required when the option is supplied.
+The suffix `-b` selects block alignment; otherwise columns are staggered. The `2d` modes additionally generate row parity.
+Requires the ST 2022-2 media profile and an even destination port when enabled.
 
 [.opt]
-*--fec-columns* _count_
+*--smpte-2022-l* _count_
 
 [.optdoc]
 Set the number of columns L, from 1 to 20 (at least 4 in 2D mode). The default is 4.
-Requires `--fec`; columns times rows must not exceed 100.
+Requires enabled `--smpte-2022-fec`; columns times rows must not exceed 100.
 
 [.opt]
-*--fec-rows* _count_
+*--smpte-2022-d* _count_
 
 [.optdoc]
 Set the number of rows D, from 4 to 20. The default is 4.
-Requires `--fec`; columns times rows must not exceed 100.
+Requires enabled `--smpte-2022-fec`; columns times rows must not exceed 100.
 
 include::{docdir}/opt/group-common-outputs.adoc[tags=!*]

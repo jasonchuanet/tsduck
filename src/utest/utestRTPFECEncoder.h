@@ -24,6 +24,7 @@ namespace ts {
         TSUNIT_DECLARE_TEST(RestartAndStop); // Partial groups are discarded; a new session never inherits parity.
         TSUNIT_DECLARE_TEST(Recovery); // Exercise burst/iterative reconstruction through the input decoder.
         TSUNIT_DECLARE_TEST(LongRun); // Independent parity sequence counters wrap without leaking media storage.
+        TSUNIT_DECLARE_TEST(NonBlockArrangement); // Exact Annex B 4x5 example, independent of encoder scheduling.
     private:
         using SuperClass = tsunit::Test; // Make the sole test superclass explicit.
         using Encoder = RTPFECEncoder;
@@ -33,8 +34,8 @@ namespace ts {
         static constexpr uint32_t _ssrc = 0x10203040; // Media source; parity source must remain zero.
 
         static ByteBlock _packet(uint16_t sequence, size_t packet_size = PKT_SIZE, size_t count = 1);
-        static void _check(const Encoder::Datagram& parity, const Media& media, size_t columns, size_t rows, size_t emitted_at);
-        static void _exercise(size_t columns, size_t rows, bool two_dimensional, size_t packet_size = PKT_SIZE, size_t count = 1);
+        static void _check(const Encoder::Datagram& parity, const Media& media, size_t columns, size_t rows, size_t emitted_at, bool block_aligned = true);
+        static void _exercise(size_t columns, size_t rows, bool two_dimensional, size_t packet_size = PKT_SIZE, size_t count = 1, bool block_aligned = true);
     };
 
     inline ByteBlock RTPFECEncoderTest::_packet(uint16_t sequence, size_t packet_size, size_t count)
@@ -55,7 +56,7 @@ namespace ts {
         return data;
     }
 
-    inline void RTPFECEncoderTest::_check(const Encoder::Datagram& parity, const Media& media, size_t columns, size_t rows, size_t emitted_at)
+    inline void RTPFECEncoderTest::_check(const Encoder::Datagram& parity, const Media& media, size_t columns, size_t rows, size_t emitted_at, bool block_aligned)
     {
         const auto& data = parity.data();
         TSUNIT_ASSERT(data.size() > 28); // Header access is checked before interpreting any wire field.
@@ -66,6 +67,11 @@ namespace ts {
         const size_t last = base + (count - 1) * stride;
         TSUNIT_ASSERT(last <= emitted_at); // No parity may precede any of its protected media.
         TSUNIT_ASSERT(parity.isRow() ? emitted_at - last <= columns : emitted_at - last >= columns && emitted_at - last <= columns * rows);
+        if (!parity.isRow()) {
+            // SNBase exposes alignment directly; equal counts or successful XOR alone cannot prove it.
+            TSUNIT_EQUAL(block_aligned ? base % columns : (base % columns % rows) * columns + base % columns, base % (columns * rows));
+            TSUNIT_ASSERT(block_aligned || emitted_at - last == columns); // Staggered columns use exactly the minimum allowed delay.
+        }
         TSUNIT_EQUAL(0x80, data[0]); // Fixed RTP profile, independently verified.
         TSUNIT_EQUAL(96, data[1]);
         TSUNIT_EQUAL(0, GetUInt32(data.data() + 8)); // Required FEC SSRC.
@@ -99,10 +105,10 @@ namespace ts {
         }
     }
 
-    inline void RTPFECEncoderTest::_exercise(size_t columns, size_t rows, bool two_dimensional, size_t packet_size, size_t count)
+    inline void RTPFECEncoderTest::_exercise(size_t columns, size_t rows, bool two_dimensional, size_t packet_size, size_t count, bool block_aligned)
     {
         Encoder encoder;
-        TSUNIT_ASSERT(encoder.reset(columns, rows, two_dimensional));
+        TSUNIT_ASSERT(encoder.reset(columns, rows, two_dimensional, block_aligned));
         Media media;
         Encoder::Datagrams output;
         size_t row_count = 0; // Separate oracles detect accidentally shared sequence counters.
@@ -112,7 +118,7 @@ namespace ts {
             TSUNIT_ASSERT(encoder.addMedia(media.back().data(), media.back().size(), output));
             TSUNIT_ASSERT(output.size() <= 2); // Traffic shaping bounds both instantaneous output and pending storage.
             for (const auto& parity : output) {
-                _check(parity, media, columns, rows, index);
+                _check(parity, media, columns, rows, index, block_aligned);
                 auto& sequence = parity.isRow() ? row_count : column_count;
                 TSUNIT_EQUAL(static_cast<uint16_t>(sequence), GetUInt16(parity.data().data() + 2));
                 ++sequence; // Independent stream counters must never inherit media sequence.

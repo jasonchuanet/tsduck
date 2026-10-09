@@ -16,6 +16,11 @@ namespace ts {
         constexpr size_t MAX_STREAMS = 2; // One column stream and one optional row stream.
         constexpr uint16_t PORT_STEP = 2; // Leave each RTP stream's adjacent RTCP port available.
         constexpr uint16_t MAX_PORT = 65535; // Validate before narrowing destination port arithmetic.
+        constexpr int DISABLED = 0; // Match the established dektec default, explicit "none".
+        constexpr int COLUMN = 1; // Staggered column-only FEC, ST 2022-1 Level A.
+        constexpr int COLUMN_BLOCK = 2; // The -b suffix has the same alignment meaning as dektec.
+        constexpr int COLUMN_ROW = 3; // Staggered columns plus consecutive rows, Level B.
+        constexpr int COLUMN_ROW_BLOCK = 4; // Block-aligned columns plus consecutive rows.
     }
 }
 
@@ -30,18 +35,26 @@ ts::RTPFECOutput::RTPFECOutput(Report& report) :
 
 void ts::RTPFECOutput::defineArgs(Args& args) const
 {
-    args.option(u"fec", 0, Args::INTEGER, 0, 1, 1, 2, true); // An omitted value enables the two-stream profile.
-    args.help(u"fec", u"1|2",
-              u"With --rtp, generate SMPTE ST 2022-1 column FEC (1) or column and row FEC (2, the default). "
+    // A supplied selector requires a value, just like dektec output; omission disables FEC.
+    args.option(u"smpte-2022-fec", 0, Names({
+        {u"none", DISABLED},
+        {u"1d", COLUMN},
+        {u"1d-b", COLUMN_BLOCK},
+        {u"2d", COLUMN_ROW},
+        {u"2d-b", COLUMN_ROW_BLOCK},
+    }));
+    args.help(u"smpte-2022-fec", u"mode",
+              u"With --rtp, generate SMPTE ST 2022-1 column FEC (1d) or column and row FEC (2d). "
+              u"The suffix -b selects block alignment; otherwise columns are staggered. The default is none. "
               u"FEC uses the media destination port +2 and +4, with the same source port. "
               u"Requires an even media port, payload type 33 and at most seven TS packets per datagram.");
-    args.option(u"fec-columns", 0, Args::INTEGER, 0, 1, 1, RTPFECEncoder::MAX_COLUMNS); // L controls burst-loss protection.
-    args.help(u"fec-columns", u"count",
+    args.option(u"smpte-2022-l", 0, Args::INTEGER, 0, 1, 1, RTPFECEncoder::MAX_COLUMNS); // Reuse dektec's L: columns.
+    args.help(u"smpte-2022-l", u"count",
               u"Number of FEC columns L, from 1 to 20 (at least 4 with 2D FEC). The default is 4. "
-              u"Requires --fec. Columns times rows must not exceed 100.");
-    args.option(u"fec-rows", 0, Args::INTEGER, 0, 1, RTPFECEncoder::MIN_ROWS, RTPFECEncoder::MAX_ROWS); // D controls column overhead.
-    args.help(u"fec-rows", u"count",
-              u"Number of FEC rows D, from 4 to 20. The default is 4. Requires --fec. "
+              u"Requires enabled --smpte-2022-fec. Columns times rows must not exceed 100.");
+    args.option(u"smpte-2022-d", 0, Args::INTEGER, 0, 1, RTPFECEncoder::MIN_ROWS, RTPFECEncoder::MAX_ROWS); // Reuse dektec's D: rows.
+    args.help(u"smpte-2022-d", u"count",
+              u"Number of FEC rows D, from 4 to 20. The default is 4. Requires enabled --smpte-2022-fec. "
               u"Columns times rows must not exceed 100. Parity is interleaved with subsequent media.");
 }
 
@@ -51,20 +64,25 @@ void ts::RTPFECOutput::defineArgs(Args& args) const
 
 bool ts::RTPFECOutput::loadArgs(Args& args, const IPSocketAddress& destination, bool rtp, uint8_t payload_type, size_t burst)
 {
-    // Optional integer values distinguish an absent flag from bare --fec.
-    // Configuration stays disabled for every pre-existing output path.
-    _streams = args.present(u"fec") ? args.intValue<size_t>(u"fec", 2) : 0;
+    // Named modes select the wire dimension and alignment, independently of vendor pacing labels.
+    const int mode = args.intValue<int>(u"smpte-2022-fec", DISABLED);
+    if (mode < DISABLED || mode > COLUMN_ROW_BLOCK) {
+        args.error(u"invalid SMPTE-2022 FEC mode"); // Reject numeric enumeration values outside our supported modes too.
+        return false;
+    }
+    _streams = mode == DISABLED ? 0 : (mode == COLUMN || mode == COLUMN_BLOCK ? 1 : MAX_STREAMS);
+    _block_aligned = mode == COLUMN_BLOCK || mode == COLUMN_ROW_BLOCK;
     // Matrix parameters count RTP datagrams, not individual transport packets.
-    args.getIntValue(_columns, u"fec-columns", RTPFECEncoder::DEFAULT_COLUMNS);
-    args.getIntValue(_rows, u"fec-rows", RTPFECEncoder::DEFAULT_ROWS);
+    args.getIntValue(_columns, u"smpte-2022-l", RTPFECEncoder::DEFAULT_COLUMNS);
+    args.getIntValue(_rows, u"smpte-2022-d", RTPFECEncoder::DEFAULT_ROWS);
     // A matrix without an enabled encoder is almost certainly a command-line mistake.
-    if (_streams == 0 && (args.present(u"fec-columns") || args.present(u"fec-rows"))) {
-        args.error(u"--fec-columns and --fec-rows require --fec"); // Do not silently ignore a requested matrix.
+    if (_streams == 0 && (args.present(u"smpte-2022-l") || args.present(u"smpte-2022-d"))) {
+        args.error(u"--smpte-2022-l and --smpte-2022-d require enabled --smpte-2022-fec"); // Do not ignore a requested matrix.
         return false;
     }
     // The profile restrictions let missing RTP header fields be reconstructed uniquely.
     if (_streams > 0 && (!rtp || payload_type != RTP_PT_MP2T || burst > RTPFECEncoder::MAX_TS_PACKETS)) {
-        args.error(u"--fec requires --rtp, payload type 33 and --packet-burst at most 7");
+        args.error(u"--smpte-2022-fec requires --rtp, payload type 33 and --packet-burst at most 7");
         return false; // The parity profile cannot protect arbitrary RTP header/payload formats.
     }
     // Bound fields before multiplying; public callers may supply their own Args schema.
@@ -76,7 +94,7 @@ bool ts::RTPFECOutput::loadArgs(Args& args, const IPSocketAddress& destination, 
     }
     // Destination arithmetic is checked before conversion back to a 16-bit port.
     if (_streams > 0 && (destination.port() == 0 || destination.port() % 2 != 0 || destination.port() > MAX_PORT - PORT_STEP * _streams)) {
-        args.error(u"--fec requires an even media destination port with room for its parity ports");
+        args.error(u"--smpte-2022-fec requires an even media destination port with room for its parity ports");
         return false; // Avoid zero ports, odd RTP ports and UDP port wraparound.
     }
     _column_destination = _row_destination = destination; // Keep the exact IP version and multicast/unicast address.
@@ -94,7 +112,7 @@ bool ts::RTPFECOutput::reset()
     clear(); // A restarted or newly disabled plugin must not retain the last run's parity.
     // No storage is allocated when FEC is disabled.
     // Stream numbering starts independently from the media's chosen initial sequence.
-    return _streams == 0 || _encoder.reset(_columns, _rows, _streams == MAX_STREAMS);
+    return _streams == 0 || _encoder.reset(_columns, _rows, _streams == MAX_STREAMS, _block_aligned);
 }
 
 void ts::RTPFECOutput::clear()

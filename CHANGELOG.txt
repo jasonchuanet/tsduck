@@ -17,11 +17,13 @@ VERSION 3.46-4827 (October 2026)
     and the specification may evolve.
   * Output plugin "ip" can generate SMPTE ST 2022-1 column FEC (1D) or column
     and row FEC (2D) for ST 2022-2 RTP media, with configurable matrix dimensions.
-    Parity uses the media UDP socket and aligned, interleaved emission scheduling.
+    Parity uses the media UDP socket and block-aligned or staggered columns.
+    The --smpte-2022-fec, --smpte-2022-l and --smpte-2022-d names follow dektec.
 
   * Input plugin "ip" can recover missing SMPTE ST 2022-2 RTP datagrams using
     SMPTE ST 2022-1 column FEC (1D) or column and row FEC (2D). Reception uses
     bounded buffering, sequence reordering and iterative parity recovery.
+    The --smpte-2022-fec flag, as in dektec, detects dimension and alignment.
   * The "TSDuck Developer Guide" has been split in three different guides:  the
     "Builder Guide"  (how to build and install TSDuck),  the  "Developer Guide"
     (how to develop applications using the TSDuck  library),  the  "Contributor
@@ -33,7 +35,10 @@ VERSION 3.46-4827 (October 2026)
       plugins "srt".
   * New options in existing commands and plugins:
     - Option --display-url in plugins "srt".
-    - Options --fec, --fec-latency, --fec-buffer-size in input plugin "ip".
+    - Option --smpte-2022-fec in input and output plugins "ip".
+    - Options --smpte-2022-fec-latency and --smpte-2022-fec-buffer-size in input
+      plugin "ip".
+    - Options --smpte-2022-l and --smpte-2022-d in output plugin "ip".
 
 [BUG] Bug fixes:
 

@@ -23,7 +23,8 @@ Using this plugin forces `tsp` and all plugins to use their real-time defaults (
 [.usage]
 SMPTE forward error correction
 
-Use `--fec=1` to receive SMPTE ST 2022-1 column FEC (1D), or `--fec=2` to receive column and row FEC (2D).
+Use `--smpte-2022-fec` to receive SMPTE ST 2022-1 FEC, matching the `dektec` input option.
+The receiver automatically handles column-only (1D) or column and row (2D) senders, with block-aligned or staggered columns.
 The media stream uses the specified UDP port, column FEC uses that port plus 2, and row FEC uses that port plus 4.
 All streams use the same destination address and local interface, for unicast or multicast.
 An explicit source IP filter also applies to FEC, but the media source port filter does not apply to the FEC streams.
@@ -44,10 +45,11 @@ Loss patterns that cannot be recovered are skipped when their playout deadline e
 FEC packets may also be lost; the plugin continues receiving media when no parity is available.
 A change of media SSRC starts a new FEC session.
 
-Choose `--fec-latency` to cover the sender's FEC delay and network jitter.
+Choose `--smpte-2022-fec-latency` to cover the sender's FEC delay and network jitter.
 For block-aligned FEC, allow approximately two matrices of media transmission time, plus network jitter.
+For staggered columns, allow approximately one matrix of media transmission time, plus network jitter.
 The default latency is one second.
-The sequence window set by `--fec-buffer-size` must also accommodate the media rate over this delay and the FEC history.
+The sequence window set by `--smpte-2022-fec-buffer-size` must also accommodate the media rate over this delay and the FEC history.
 If the window fills, older media are released before their deadline and recovery may be reduced.
 At verbose level the plugin reports recovered and unrecoverable RTP datagram counts when stopping.
 Receive queue overflow is reported separately; increase the buffer size if this occurs.
@@ -56,7 +58,7 @@ For example, receive media on multicast port 5000, column FEC on port 5002, and 
 
 [source,shell]
 ----
-$ tsp -I ip 239.1.2.3:5000 --fec=2 --fec-latency 1000 -O file recovered.ts
+$ tsp -I ip 239.1.2.3:5000 --smpte-2022-fec --smpte-2022-fec-latency 1000 -O file recovered.ts
 ----
 
 [.usage]
@@ -103,33 +105,33 @@ and receives the packets which are sent to one of the local (unicast) IP address
 UDP reception options
 
 [.opt]
-*--fec*[=1|2]
+*--smpte-2022-fec*
 
 [.optdoc]
 Enable SMPTE ST 2022-1 FEC for MPEG-TS over RTP using the SMPTE ST 2022-2 media profile.
-The value 1 enables column FEC on the media port plus 2.
-The value 2 enables column and row FEC on the media ports plus 2 and plus 4.
-When no value is supplied, 2 is used.
+Column FEC is received on the media port plus 2, and optional row FEC on the media port plus 4.
+This option is a flag: no mode or matrix dimensions are supplied on input.
+Each parity header supplies its protected sequence base, offset and count, so the receiver makes no assumption about alignment.
 FEC is disabled by default.
 
 [.opt]
-*--fec-buffer-size* _datagrams_
+*--smpte-2022-fec-buffer-size* _datagrams_
 
 [.optdoc]
 Bound the media sequence window, pending parity and receive queue used for FEC.
 The value is in RTP datagrams, not TS packets or bytes, and must be between 256 and 32767.
 The default is 4096.
 When the sequence window fills, older media are released early.
-Requires `--fec`.
+Requires `--smpte-2022-fec`.
 
 [.opt]
-*--fec-latency* _milliseconds_
+*--smpte-2022-fec-latency* _milliseconds_
 
 [.optdoc]
 Specify the FEC playout latency, including time for the sender's parity and network jitter.
 The default is 1000 milliseconds; the permitted range is 1 to 60000 milliseconds.
 Missing media are skipped when their deadline expires.
-Requires `--fec`.
+Requires `--smpte-2022-fec`.
 
 [.opt]
 *-b* _value_ +

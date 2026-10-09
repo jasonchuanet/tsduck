@@ -5,7 +5,7 @@
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
-// Original implementation of ST 2022-1:2007 sections 7, 8 and 9 / Annex C.
+// Original implementation of ST 2022-1:2007 sections 7, 8 and 9 / Annexes B and C.
 // No external FEC implementation or standards document is redistributed.
 // Protocol references: https://pub.smpte.org/pub/st2022-1/ and /st2022-2/.
 
@@ -37,7 +37,7 @@ namespace ts {
 // Configuration bounds are validated before allocating or discarding state.
 //----------------------------------------------------------------------------
 
-bool ts::RTPFECEncoder::reset(size_t columns, size_t rows, bool two_dimensional)
+bool ts::RTPFECEncoder::reset(size_t columns, size_t rows, bool two_dimensional, bool block_aligned)
 {
     if (columns == 0 || columns > MAX_COLUMNS || rows < MIN_ROWS || rows > MAX_ROWS ||
         columns * rows > MAX_MATRIX || (two_dimensional && columns < MIN_2D_COLUMNS)) {
@@ -47,6 +47,7 @@ bool ts::RTPFECEncoder::reset(size_t columns, size_t rows, bool two_dimensional)
     _columns_count = columns;
     _rows_count = rows;
     _two_dimensional = two_dimensional;
+    _block_aligned = block_aligned;
     _columns.resize(columns); // Only L equations, not an entire matrix of media packets.
     return true;
 }
@@ -55,6 +56,7 @@ void ts::RTPFECEncoder::clear()
 {
     _columns_count = _rows_count = 0; // Adding media is rejected until reset establishes geometry.
     _two_dimensional = _initialized = false;
+    _block_aligned = true;
     _expected_sequence = _column_sequence = _row_sequence = 0; // Independent wire counters.
     _ssrc = 0;
     _position = _next_column = 0;
@@ -128,6 +130,25 @@ void ts::RTPFECEncoder::_emit(ByteBlock& parity, bool row, Datagrams& output)
 }
 
 //----------------------------------------------------------------------------
+// Stagger column c by c modulo D rows. The modulo bounds startup to one matrix
+// even when L > D, and supports non-coprime L/D without leaving columns unused.
+// Like Annex B's 4x5 example, SNBase values are 0,5,10,15,20,... in that case.
+//----------------------------------------------------------------------------
+
+void ts::RTPFECEncoder::_staggeredColumn(const Media& media, Datagrams& output)
+{
+    const size_t column = _position % _columns_count;
+    const size_t phase = (column % _rows_count) * _columns_count + column;
+    auto& parity = _columns[column]; // One equation spans a block boundary instead of awaiting a block interleaver.
+    if (_position == phase && !parity.empty()) {
+        _emit(parity, false, output); // The next group's first member is L intervals after the previous group's last.
+    }
+    if (!parity.empty() || _position >= phase) {
+        _accumulate(parity, media, false); // Skip only the incomplete startup prefix; NA is never shortened.
+    }
+}
+
+//----------------------------------------------------------------------------
 // Aligned Annex C schedule: column c of the previous matrix follows media c*D
 // of the next one. Its delay is L+c*(D-1), always within [L,L*D].
 // Rows follow their last media immediately, within the allowed [0,L] delay.
@@ -152,7 +173,12 @@ bool ts::RTPFECEncoder::addMedia(const void* address, size_t size, Datagrams& ou
             _pending.clear(); // The previous matrix is fully emitted before this matrix completes.
         }
     }
-    _accumulate(_columns[_position % _columns_count], media, false); // Each media contributes to exactly one column.
+    if (_block_aligned) {
+        _accumulate(_columns[_position % _columns_count], media, false); // Aligned columns share a matrix boundary.
+    }
+    else {
+        _staggeredColumn(media, output); // Staggered columns emit independently at their next group's start.
+    }
     if (_two_dimensional) {
         _accumulate(_row, media, true);
         if (_position % _columns_count == _columns_count - 1) {
@@ -160,9 +186,11 @@ bool ts::RTPFECEncoder::addMedia(const void* address, size_t size, Datagrams& ou
         }
     }
     if (++_position == _columns_count * _rows_count) {
-        assert(_pending.empty()); // All older columns were emitted at least D-1 media before this boundary.
-        _pending.swap(_columns); // Move complete equations without copying their payloads.
-        _columns.resize(_columns_count); // Reuse empty equation slots for the new matrix.
+        if (_block_aligned) {
+            assert(_pending.empty()); // All older columns were emitted at least D-1 media before this boundary.
+            _pending.swap(_columns); // Move complete equations without copying their payloads.
+            _columns.resize(_columns_count); // Reuse empty equation slots for the new matrix.
+        }
         _position = _next_column = 0;
     }
     return true;

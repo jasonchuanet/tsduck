@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -82,6 +82,11 @@ void ts::TSDatagramOutput::defineArgs(Args& args)
                   u"Each TS packet is followed by a 16-byte trailer. "
                   u"If the input packet contained a trailer, it is copied. "
                   u"Otherwise, the trailer is set to all 0xFF.");
+    }
+
+    // Expose FEC only on explicitly enabled raw UDP outputs, never SRT/RIST handlers.
+    if (_raw_udp && static_cast<bool>(_flags & TSDatagramOutputOptions::ALLOW_FEC)) {
+        _fec_output.defineArgs(args);
     }
 
     // The following options are defined only when raw UDP is allowed.
@@ -173,7 +178,8 @@ bool ts::TSDatagramOutput::loadArgs(DuckContext& duck, Args& args)
         _rs204_format = args.present(u"rs204");
     }
 
-    return true;
+    return !_raw_udp || !static_cast<bool>(_flags & TSDatagramOutputOptions::ALLOW_FEC) ||
+           _fec_output.loadArgs(args, _destination, _use_rtp, _rtp_pt, _pkt_burst);
 }
 
 
@@ -186,6 +192,11 @@ bool ts::TSDatagramOutput::open()
     if (_is_open) {
         _report.error(u"TSDatagramOutput is already open");
         return false;
+    }
+
+    if (!_fec_output.reset()) {
+        _report.error(u"invalid FEC output configuration");
+        return false; // Validate before opening the media socket or retaining partial state.
     }
 
     // The output buffer is empty.
@@ -266,6 +277,7 @@ bool ts::TSDatagramOutput::close(const BitRate& bitrate, bool abort)
         if (_raw_udp) {
             _sock.close();
         }
+        _fec_output.clear(); // End of stream cannot flush columns that need future media spacing.
         _is_open = false;
     }
     return success;
@@ -504,5 +516,6 @@ bool ts::TSDatagramOutput::sendPackets(const TSPacket* pkt, const TSPacketMetada
 
 bool ts::TSDatagramOutput::sendDatagram(const void* address, size_t size)
 {
-    return _sock.send(address, size);
+    // Encode only successfully transmitted media; explicit parity sends preserve this default destination.
+    return _sock.send(address, size) && _fec_output.send(_sock, address, size);
 }

@@ -15,6 +15,10 @@ VERSION 3.46-4827 (October 2026)
   * The plugins "srt" now accept a srt:// URL as parameter. The URL can contain
     most usual SRT parameters. The format of these URLs is not yet standardized
     and the specification may evolve.
+  * Output plugin "ip" can generate SMPTE ST 2022-1 column FEC (1D) or column
+    and row FEC (2D) for ST 2022-2 RTP media, with configurable matrix dimensions.
+    Parity uses the media UDP socket and aligned, interleaved emission scheduling.
+
   * Input plugin "ip" can recover missing SMPTE ST 2022-2 RTP datagrams using
     SMPTE ST 2022-1 column FEC (1D) or column and row FEC (2D). Reception uses
     bounded buffering, sequence reordering and iterative parity recovery.

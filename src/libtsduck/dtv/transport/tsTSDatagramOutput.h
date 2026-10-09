@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -18,6 +18,7 @@
 #include "tsUDPSocket.h"
 #include "tsIPProtocols.h"
 #include "tsEnumUtils.h"
+#include "tsRTPFECOutput.h"
 
 namespace ts {
     //!
@@ -29,6 +30,7 @@ namespace ts {
         ALLOW_RTP    = 0x0001,  //!< Allow RTP options to build an RTP datagram.
         ALWAYS_BURST = 0x0002,  //!< Do not define option --enforce-burst, always enforce burst.
         ALLOW_RS204  = 0x0004,  //!< Allow option --rs204 to send 204-byte packets.
+        ALLOW_FEC    = 0x0008,  //!< Allow ST 2022-1 FEC for raw UDP with ALLOW_RTP; other transports are unaffected.
     };
 }
 TS_ENABLE_BITMASK_OPERATORS(ts::TSDatagramOutputOptions);
@@ -143,6 +145,8 @@ namespace ts {
         bool            _mc_loopback = true;         // Multicast loopback option
         bool            _force_mc_local = false;     // Force multicast outgoing local interface
         size_t          _send_bufsize = 0;           // Socket send buffer size.
+
+        RTPFECOutput _fec_output {_report}; //!< Optional parity sent through the same media socket.
 
         // Working data.
         bool            _is_open = false;            // Currently in progress

@@ -45,6 +45,7 @@ VERSION 3.46-4827 (October 2026)
   * Invalid plugin arguments now return a startup failure in TSProcessor and
     InputSwitcher instead of exiting the calling process. Commands preserve
     their failure exit code and flush asynchronous error diagnostics.
+    Changing argument error policy preserves custom option definitions.
   * Fixed issue #1749:  A regression  was  introduced  in  v3.45  in TR 101 290
     analysis: consecutive PCR in range -100 .. -1 were no longer detected as an
     error.

@@ -1,7 +1,7 @@
 //----------------------------------------------------------------------------
 //
 // TSDuck - The MPEG Transport Stream Toolkit
-// Copyright (c) 2005-2026, Thierry Lelegard
+// Copyright (c) 2005-2026, Thierry Lelegard, Jason Chua
 // BSD-2-Clause license, see LICENSE.txt file or https://tsduck.io/license
 //
 //----------------------------------------------------------------------------
@@ -45,6 +45,7 @@ TS_STATIC_REFERENCE(Ref, reinterpret_cast<const void*>(ts::GetVatekVersion));
 class ArgsTest: public tsunit::Test
 {
     TSUNIT_DECLARE_TEST(Accessors);
+    TSUNIT_DECLARE_TEST(PolicyFlagsPreserveOptions);
     TSUNIT_DECLARE_TEST(HelpDefault);
     TSUNIT_DECLARE_TEST(CopyOptions);
     TSUNIT_DECLARE_TEST(HelpCustom);
@@ -135,6 +136,41 @@ TSUNIT_DEFINE_TEST(Accessors)
 
     args.setFlags(ts::Args::NO_EXIT_ON_ERROR);
     TSUNIT_EQUAL(int(ts::Args::NO_EXIT_ON_ERROR), args.getFlags());
+}
+
+// Error policy must not erase custom definitions using predefined option names.
+TSUNIT_DEFINE_TEST(PolicyFlagsPreserveOptions)
+{
+    // Plugins disable predefined options and can reuse their names themselves.
+    // All four names below denote ordinary string values, not help/version
+    // requests or logging controls in this parser.
+    const int disabled = ts::Args::NO_HELP | ts::Args::NO_VERSION | ts::Args::NO_DEBUG | ts::Args::NO_VERBOSE;
+    ts::ReportBuffer<> log;
+    ts::Args custom(u"", u"", disabled);
+    custom.delegateReport(&log);
+    // Give every reused name a value, unlike some of the built-in definitions.
+    for (const auto* name : {u"help", u"version", u"debug", u"verbose"}) {
+        custom.option(name, 0, ts::Args::STRING);
+    }
+    // Changing only the exit policy must retain definitions before parsing.
+    custom.setFlags(disabled | ts::Args::NO_EXIT_ON_ERROR);
+    TSUNIT_ASSERT(custom.analyze(u"test", {u"--help", u"value", u"--version", u"value", u"--debug", u"value", u"--verbose", u"value"}));
+    // Restoring the policy must retain the already parsed values as well.
+    // A repeated policy change must not turn custom options back into built-ins.
+    custom.setFlags(disabled);
+    custom.setFlags(disabled | ts::Args::NO_EXIT_ON_ERROR);
+    for (const auto* name : {u"help", u"version", u"debug", u"verbose"}) {
+        TSUNIT_EQUAL(u"value", custom.value(name));
+    }
+    // The controlling flags must still remove genuine predefined options.
+    // A separate parser checks actual built-in removal, independently of the
+    // custom definitions which the positive case protects.
+    ts::Args predefined(u"", u"", ts::Args::NO_EXIT_ON_ERROR);
+    predefined.delegateReport(&log);
+    predefined.setFlags(disabled | ts::Args::NO_EXIT_ON_ERROR);
+    for (const auto* name : {u"help", u"version", u"debug", u"verbose"}) {
+        TSUNIT_ASSERT(!predefined.analyze(u"test", {ts::UString(u"--") + name}));
+    }
 }
 
 // Test case: help text with default options

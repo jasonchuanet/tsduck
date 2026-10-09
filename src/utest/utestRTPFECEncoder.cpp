@@ -82,7 +82,10 @@ namespace ts {
             TSUNIT_ASSERT(!encoder.addMedia(good.data(), size, output)); // Reject every short RTP header before reading fields.
         }
         TSUNIT_ASSERT(!encoder.addMedia(good.data(), std::numeric_limits<size_t>::max(), output)); // Bound size before borrowing memory.
-        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{0, 0x40}, {0, 0xA0}, {0, 0x90}, {0, 0x81}, {1, 0xA1}, {1, 34}, {12, 0}}) {
+        // Exact byte types avoid narrowing in the pair's forwarding constructor on MSVC.
+        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {
+                 {0, uint8_t(0x40)}, {0, uint8_t(0xA0)}, {0, uint8_t(0x90)}, {0, uint8_t(0x81)},
+                 {1, uint8_t(0xA1)}, {1, uint8_t(34)}, {12, uint8_t(0)}}) {
             auto bad = good;
             bad[field.first] = field.second; // Each invalid profile field is tested independently.
             TSUNIT_ASSERT(!encoder.addMedia(bad.data(), bad.size(), output));

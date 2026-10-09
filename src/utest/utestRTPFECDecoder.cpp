@@ -196,22 +196,24 @@ namespace ts {
         }
         // Version, RTP padding/extension/CC, PT, SSRC, E, mask, N, D, type,
         // index, row offset, NA and SNBase extension must all be checked.
+        // Exact byte types avoid narrowing in the pair's forwarding constructor on MSVC.
         for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {
-                 {0, 0x40}, {0, 0xA0}, {0, 0x90}, {0, 0x81}, {1, 97}, {8, 1},
-                 {16, 0}, {16, 0xFF}, {17, 1}, {24, 0xC0}, {24, 0}, {24, 0x48}, {24, 0x41},
-                 {25, 0}, {25, 2}, {26, 0}, {27, 1}}) {
+                 {0, uint8_t(0x40)}, {0, uint8_t(0xA0)}, {0, uint8_t(0x90)}, {0, uint8_t(0x81)},
+                 {1, uint8_t(97)}, {8, uint8_t(1)}, {16, uint8_t(0)}, {16, uint8_t(0xFF)}, {17, uint8_t(1)},
+                 {24, uint8_t(0xC0)}, {24, uint8_t(0)}, {24, uint8_t(0x48)}, {24, uint8_t(0x41)},
+                 {25, uint8_t(0)}, {25, uint8_t(2)}, {26, uint8_t(0)}, {27, uint8_t(1)}}) {
             auto bad = good;
             bad.data()[field.first] = field.second; // Change one field while keeping the rest of the packet valid.
             TSUNIT_ASSERT(!decoder.addFEC(bad, true));
         }
         // Valid headers with invalid recovery length or TS sync cannot poison media.
-        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{14, 0xFF}, {28, 0xFF}}) {
+        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{14, uint8_t(0xFF)}, {28, uint8_t(0xFF)}}) {
             auto bad = good;
             bad.data()[field.first] = field.second; // Change one field while keeping the rest of the packet valid.
             TSUNIT_ASSERT(decoder.addFEC(bad, true));
             TSUNIT_EQUAL(0, decoder.recoveredPackets()); // No underdetermined or invalid equation may produce media.
         }
-        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{0, 0}, {1, 34}, {12, 0}}) {
+        for (const auto& field : std::vector<std::pair<size_t, uint8_t>> {{0, uint8_t(0)}, {1, uint8_t(34)}, {12, uint8_t(0)}}) {
             auto bad = media[1];
             bad.data()[field.first] = field.second; // Change one field while keeping the rest of the packet valid.
             TSUNIT_ASSERT(!decoder.addMedia(bad));
